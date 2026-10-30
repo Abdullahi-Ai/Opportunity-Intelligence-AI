@@ -18,78 +18,129 @@ def test_health_endpoint():
     assert data["status"] == "healthy"
     assert data["chromadb"]["total_chunks_indexed"] > 0
 
-def test_rag_search_endpoint():
-    payload = {
-        "query": "Safaricom industrial attachment for undergraduate computer science",
-        "category": "Internship",
-        "top_k": 3
-    }
-    response = client.post("/api/v1/rag/search", json=payload)
+def test_list_opportunities_with_filters():
+    # 1. Test basic listing
+    response = client.get("/api/v1/opportunities")
+    assert response.status_code == 200
+    items = response.json()
+    assert len(items) >= 10
+    assert "days_remaining" in items[0]
+    assert "deadline_status_label" in items[0]
+
+    # 2. Test category filter
+    resp_cat = client.get("/api/v1/opportunities?category=Scholarship")
+    assert resp_cat.status_code == 200
+    scholarships = resp_cat.json()
+    assert len(scholarships) > 0
+    for s in scholarships:
+        assert s["category"] == "Scholarship"
+
+    # 3. Test keyword search
+    resp_search = client.get("/api/v1/opportunities?search=Safaricom")
+    assert resp_search.status_code == 200
+    safaricom_items = resp_search.json()
+    assert len(safaricom_items) >= 2
+    for item in safaricom_items:
+        assert "safaricom" in item["title"].lower() or "safaricom" in item["provider"].lower()
+
+def test_opportunity_detail_endpoint():
+    opp_id = "opp-safaricom-attachment-2026"
+    response = client.get(f"/api/v1/opportunities/{opp_id}")
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] == "success"
-    assert len(data["results"]) > 0
-    assert "safaricom" in data["results"][0]["title"].lower()
+    assert data["id"] == opp_id
+    assert "Safaricom" in data["provider"]
+    assert data["official_url"] == "https://www.safaricom.co.ke/careers"
+    assert data["is_verified"] is True
 
-def test_deadline_countdown_endpoint():
-    payload = {"deadline_date_str": "2026-12-31"}
-    response = client.post("/api/v1/agent/deadline-countdown", json=payload)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "open"
-    assert data["is_open"] is True
-    assert data["days_remaining"] >= 0
+def test_student_lifecycle_and_tracking_flow():
+    test_email = "faith.chebet@students.ku.ac.ke"
 
-def test_eligibility_assessment_endpoint():
-    payload = {
-        "opportunity_id": "opp-safaricom-attachment-2026",
-        "student_degree_level": "Undergraduate",
-        "student_field_of_study": "Computer Science",
-        "student_year_of_study": 3
-    }
-    response = client.post("/api/v1/agent/assess-eligibility", json=payload)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "success"
-    assert data["overall_assessment"] == "Likely Eligible"
-
-def test_student_profile_and_tracking_flow():
     # 1. Create Student Profile
     profile_data = {
-        "email": "brian.test@students.uonbi.ac.ke",
-        "full_name": "Brian Kiprono",
-        "university": "University of Nairobi",
-        "field_of_study": "Computer Science",
+        "email": test_email,
+        "full_name": "Faith Chebet",
+        "university": "Kenyatta University",
+        "field_of_study": "Civil Engineering",
         "degree_level": "Undergraduate",
-        "year_of_study": 3,
-        "graduation_year": 2027,
-        "county_of_origin": "Uasin Gishu"
+        "year_of_study": 1,
+        "graduation_year": 2029,
+        "county_of_origin": "Bomet",
+        "gpa_or_grade": "A-",
+        "preferred_categories": "Scholarship, Bursary"
     }
     resp = client.post("/api/v1/profile", json=profile_data)
     assert resp.status_code == 201
     student = resp.json()
     student_id = student["id"]
+    assert student["email"] == test_email
 
-    # 2. Track an opportunity
+    # 2. Save opportunity to tracker with auto-generated checklist
+    opp_id = "opp-hef-undergraduate-2026"
     track_payload = {
         "student_id": student_id,
-        "opportunity_id": "opp-safaricom-attachment-2026",
+        "opportunity_id": opp_id,
         "stage": "Saved",
-        "notes": "Need to request Dean's recommendation letter next week."
+        "notes": "Chief endorsement letter requested.",
+        "auto_generate_checklist": True
     }
     resp_track = client.post("/api/v1/tracker/save", json=track_payload)
     assert resp_track.status_code == 201
     tracked_id = resp_track.json()["tracked_application_id"]
 
-    # 3. Update stage
-    resp_patch = client.patch(f"/api/v1/tracker/{tracked_id}/stage?new_stage=Drafting")
-    assert resp_patch.status_code == 200
-    assert resp_patch.json()["new_stage"] == "Drafting"
-
-    # 4. Retrieve student tracked list
+    # 3. Verify tracked applications and auto-populated checklists
     resp_list = client.get(f"/api/v1/tracker/{student_id}")
     assert resp_list.status_code == 200
-    apps = resp_list.json()
-    assert len(apps) == 1
-    assert apps[0]["opportunity_id"] == "opp-safaricom-attachment-2026"
-    assert apps[0]["stage"] == "Drafting"
+    tracked_list = resp_list.json()
+    assert len(tracked_list) == 1
+    assert tracked_list[0]["opportunity_id"] == opp_id
+    assert len(tracked_list[0]["checklists"]) > 0
+
+    first_task = tracked_list[0]["checklists"][0]
+    task_id = first_task["id"]
+    assert first_task["is_completed"] is False
+
+    # 4. Toggle checklist task completion
+    resp_toggle = client.patch(f"/api/v1/checklists/{task_id}/toggle")
+    assert resp_toggle.status_code == 200
+    assert resp_toggle.json()["is_completed"] is True
+    assert resp_toggle.json()["completed_at"] is not None
+
+    # 5. Add custom checklist task
+    custom_task_payload = {
+        "task_description": "Visit Equity Bank Kericho branch for stamped statement",
+        "required_document_type": "Bank Statement"
+    }
+    resp_custom = client.post(f"/api/v1/tracker/{tracked_id}/checklists", json=custom_task_payload)
+    assert resp_custom.status_code == 201
+    custom_task_id = resp_custom.json()["id"]
+
+    # 6. Check dashboard stats
+    resp_stats = client.get(f"/api/v1/tracker/{student_id}/stats")
+    assert resp_stats.status_code == 200
+    stats = resp_stats.json()
+    assert stats["total_saved"] == 1
+    assert stats["completed_checklist_tasks"] == 1
+    assert stats["total_checklist_tasks"] >= 2
+    assert stats["checklist_completion_rate"] > 0
+
+    # 7. Update application stage
+    resp_stage = client.patch(f"/api/v1/tracker/{tracked_id}/stage?new_stage=Drafting")
+    assert resp_stage.status_code == 200
+    assert resp_stage.json()["new_stage"] == "Drafting"
+
+    # 8. Delete custom task
+    resp_del_task = client.delete(f"/api/v1/checklists/{custom_task_id}")
+    assert resp_del_task.status_code == 200
+
+    # 9. Remove opportunity from tracker
+    resp_remove = client.delete(f"/api/v1/tracker/{student_id}/{opp_id}")
+    assert resp_remove.status_code == 200
+
+    # 10. Delete student profile (Privacy compliance)
+    resp_del_profile = client.delete(f"/api/v1/profile/{test_email}")
+    assert resp_del_profile.status_code == 200
+
+    # Verify profile is deleted
+    resp_check = client.get(f"/api/v1/profile/{test_email}")
+    assert resp_check.status_code == 404

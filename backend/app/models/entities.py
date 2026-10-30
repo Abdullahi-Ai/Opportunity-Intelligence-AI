@@ -35,6 +35,8 @@ class StudentProfile(Base):
     year_of_study = Column(Integer, nullable=False)
     graduation_year = Column(Integer, nullable=True)
     county_of_origin = Column(String(100), nullable=True)
+    gpa_or_grade = Column(String(50), nullable=True)  # e.g. "First Class", "Upper Second", "B+"
+    preferred_categories = Column(String(255), nullable=True)  # Comma-separated e.g. "Scholarship, Internship"
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -48,10 +50,15 @@ class Opportunity(Base):
     title = Column(String(255), nullable=False)
     provider = Column(String(255), nullable=False)
     category = Column(String(50), nullable=False, index=True)
+    target_audience = Column(String(255), nullable=True)
+    fields_of_study = Column(Text, nullable=True)
+    degree_levels = Column(String(255), nullable=True)
     official_url = Column(Text, nullable=False)
     application_deadline = Column(String(50), nullable=True)
+    status = Column(String(50), default="open")  # open, expired, upcoming, uncertain
     is_verified = Column(Boolean, default=True)
     verification_date = Column(String(50), nullable=True)
+    source_notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships
