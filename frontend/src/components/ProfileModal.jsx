@@ -4,15 +4,15 @@ import { api } from '../api/client';
 
 export default function ProfileModal({ isOpen, onClose, student, onProfileSaved, onProfileDeleted }) {
   const [formData, setFormData] = useState({
-    email: student?.email || 'brian.kiprono@students.uonbi.ac.ke',
-    full_name: student?.full_name || 'Brian Kiprono',
-    university: student?.university || 'University of Nairobi',
-    field_of_study: student?.field_of_study || 'Computer Science',
+    email: student?.email || '',
+    full_name: student?.full_name || '',
+    university: student?.university || '',
+    field_of_study: student?.field_of_study || '',
     degree_level: student?.degree_level || 'Undergraduate',
-    year_of_study: student?.year_of_study || 3,
-    county_of_origin: student?.county_of_origin || 'Uasin Gishu',
-    gpa_or_grade: student?.gpa_or_grade || 'Second Class Upper (2:1)',
-    preferred_categories: student?.preferred_categories || 'Internship, Graduate Trainee',
+    year_of_study: student?.year_of_study || 1,
+    county_of_origin: student?.county_of_origin || '',
+    gpa_or_grade: student?.gpa_or_grade || '',
+    preferred_categories: student?.preferred_categories || '',
   });
 
   const [saving, setSaving] = useState(false);

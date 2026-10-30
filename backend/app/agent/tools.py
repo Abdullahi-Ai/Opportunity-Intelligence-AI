@@ -56,32 +56,59 @@ def tool_search_opportunities(input_data: SearchOpportunitiesInput) -> Dict[str,
 # Tool 2: Deterministic Deadline Countdown Tool
 # ---------------------------------------------------------
 class DeadlineCountdownInput(BaseModel):
-    deadline_date_str: str = Field(description="ISO format deadline string YYYY-MM-DD (e.g. '2026-11-30')")
+    deadline_date_str: Optional[str] = Field(default=None, description="ISO format deadline string YYYY-MM-DD (e.g. '2026-11-30') or None/empty for rolling")
+    deadline_str: Optional[str] = Field(default=None, description="Alias for deadline_date_str")
 
 def tool_calculate_deadline_countdown(input_data: DeadlineCountdownInput) -> Dict[str, Any]:
     """
     Deterministically computes days remaining and status using Python calendar arithmetic.
     NEVER relies on LLM date arithmetic to prevent hallucinations.
+    Handles missing deadlines, rolling admissions, expired dates, and boundary cases.
     """
+    today = date.today()
+    raw_date = input_data.deadline_date_str or input_data.deadline_str
+
+    if not raw_date or str(raw_date).strip().lower() in ["unspecified", "rolling", "none", "n/a", ""]:
+        return {
+            "status": "unspecified",
+            "is_open": True,
+            "deadline": None,
+            "today": str(today),
+            "days_remaining": None,
+            "days_ago": None,
+            "status_label": "Rolling / Open",
+            "summary": "No fixed deadline published (rolling admissions or continuous intake)."
+        }
+
+    clean_str = str(raw_date).strip()
     try:
-        target_date = datetime.strptime(input_data.deadline_date_str.strip(), "%Y-%m-%d").date()
+        target_date = datetime.strptime(clean_str, "%Y-%m-%d").date()
     except ValueError:
         return {
             "status": "error",
-            "message": f"Invalid date format '{input_data.deadline_date_str}'. Expected YYYY-MM-DD."
+            "is_open": False,
+            "deadline": clean_str,
+            "today": str(today),
+            "days_remaining": None,
+            "days_ago": None,
+            "status_label": "Invalid date",
+            "message": f"Invalid date format '{clean_str}'. Expected YYYY-MM-DD.",
+            "summary": f"Could not compute countdown: '{clean_str}' is not in YYYY-MM-DD format."
         }
 
-    today = date.today()
     delta_days = (target_date - today).days
 
     if delta_days < 0:
+        days_ago = abs(delta_days)
         return {
             "status": "expired",
             "is_open": False,
             "deadline": str(target_date),
             "today": str(today),
-            "days_ago": abs(delta_days),
-            "summary": f"This opportunity closed {abs(delta_days)} days ago on {target_date}."
+            "days_remaining": -days_ago,
+            "days_ago": days_ago,
+            "status_label": f"Expired ({days_ago}d ago)" if days_ago > 1 else "Expired yesterday",
+            "summary": f"This opportunity closed {days_ago} days ago on {target_date}."
         }
     elif delta_days == 0:
         return {
@@ -90,7 +117,20 @@ def tool_calculate_deadline_countdown(input_data: DeadlineCountdownInput) -> Dic
             "deadline": str(target_date),
             "today": str(today),
             "days_remaining": 0,
+            "days_ago": 0,
+            "status_label": "Closing today!",
             "summary": "Deadline is TODAY! Ensure final submission before midnight."
+        }
+    elif delta_days == 1:
+        return {
+            "status": "open",
+            "is_open": True,
+            "deadline": str(target_date),
+            "today": str(today),
+            "days_remaining": 1,
+            "days_ago": 0,
+            "status_label": "1 day left (Tomorrow)",
+            "summary": f"1 day remaining until the deadline on {target_date}."
         }
     else:
         return {
@@ -99,6 +139,8 @@ def tool_calculate_deadline_countdown(input_data: DeadlineCountdownInput) -> Dic
             "deadline": str(target_date),
             "today": str(today),
             "days_remaining": delta_days,
+            "days_ago": 0,
+            "status_label": f"{delta_days} days left",
             "summary": f"{delta_days} day(s) remaining until the deadline on {target_date}."
         }
 

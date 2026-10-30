@@ -27,6 +27,8 @@ from app.agent.tools import (
 )
 from app.api.endpoints import router as tracker_router
 from app.api.chat import router as chat_router
+from app.api.auth import router as auth_router
+from app.api.admin import router as admin_router
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -34,7 +36,9 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Include structured database & conversational assistant routes
+# Include structured database, auth, admin & conversational assistant routes
+app.include_router(auth_router)
+app.include_router(admin_router)
 app.include_router(tracker_router)
 app.include_router(chat_router)
 

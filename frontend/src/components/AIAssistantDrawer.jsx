@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { X, Bot, Send, Sparkles, ExternalLink, RefreshCw, ShieldCheck, User } from 'lucide-react';
 import { api } from '../api/client';
 
@@ -106,9 +107,37 @@ export default function AIAssistantDrawer({ isOpen, onClose, student }) {
               }`}
             >
               {/* Message Content */}
-              <div className="whitespace-pre-wrap space-y-1.5">
-                {msg.content}
-              </div>
+              {msg.role === 'assistant' ? (
+                <div className="text-slate-800 space-y-1.5 leading-relaxed">
+                  <ReactMarkdown
+                    components={{
+                      h3: ({ node, ...props }) => <h3 className="font-bold text-sm text-slate-900 mt-2 mb-1" {...props} />,
+                      h4: ({ node, ...props }) => <h4 className="font-semibold text-xs text-brand-900 mt-2 mb-0.5" {...props} />,
+                      p: ({ node, ...props }) => <p className="text-xs leading-relaxed my-1" {...props} />,
+                      ul: ({ node, ...props }) => <ul className="list-disc pl-4 space-y-1 my-1" {...props} />,
+                      ol: ({ node, ...props }) => <ol className="list-decimal pl-4 space-y-1 my-1" {...props} />,
+                      li: ({ node, ...props }) => <li className="text-xs leading-normal" {...props} />,
+                      a: ({ node, ...props }) => (
+                        <a
+                          {...props}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-brand-600 hover:text-brand-800 underline font-semibold inline-flex items-center space-x-0.5"
+                        />
+                      ),
+                      blockquote: ({ node, ...props }) => (
+                        <blockquote className="border-l-2 border-brand-500 pl-2.5 py-1 my-1.5 italic text-slate-600 bg-brand-50/60 rounded-r text-[11px]" {...props} />
+                      ),
+                      strong: ({ node, ...props }) => <strong className="font-bold text-slate-900" {...props} />,
+                      code: ({ node, ...props }) => <code className="px-1 py-0.5 rounded bg-slate-200/80 text-[11px] font-mono text-slate-800" {...props} />
+                    }}
+                  >
+                    {msg.content}
+                  </ReactMarkdown>
+                </div>
+              ) : (
+                <div className="whitespace-pre-wrap text-xs">{msg.content}</div>
+              )}
 
               {/* Citations */}
               {msg.citations && msg.citations.length > 0 && (

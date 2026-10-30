@@ -147,25 +147,13 @@ def list_opportunities(
 
     for opp in opportunities:
         # Compute dynamic date countdown deterministically
-        countdown_info = None
-        days_rem = None
-        label = opp.status
+        cd_res = tool_calculate_deadline_countdown(
+            DeadlineCountdownInput(deadline_date_str=opp.application_deadline)
+        )
+        days_rem = cd_res.get("days_remaining")
+        label = cd_res.get("status_label") or opp.status
 
-        if opp.application_deadline and opp.application_deadline != "Unspecified":
-            cd_res = tool_calculate_deadline_countdown(
-                DeadlineCountdownInput(deadline_date_str=opp.application_deadline)
-            )
-            if cd_res.get("status") == "open":
-                days_rem = cd_res.get("days_remaining")
-                label = f"{days_rem} days left"
-            elif cd_res.get("status") == "closing_today":
-                days_rem = 0
-                label = "Closing today!"
-            elif cd_res.get("status") == "expired":
-                days_rem = -cd_res.get("days_ago", 1)
-                label = "Expired"
-
-        if is_open_only and days_rem is not None and days_rem < 0:
+        if is_open_only and cd_res.get("status") == "expired":
             continue
 
         item_dict = {
@@ -195,21 +183,11 @@ def get_opportunity_details(opportunity_id: str, db: Session = Depends(get_db)):
     if not opp:
         raise HTTPException(status_code=404, detail=f"Opportunity '{opportunity_id}' not found.")
 
-    days_rem = None
-    label = opp.status
-    if opp.application_deadline and opp.application_deadline != "Unspecified":
-        cd_res = tool_calculate_deadline_countdown(
-            DeadlineCountdownInput(deadline_date_str=opp.application_deadline)
-        )
-        if cd_res.get("status") == "open":
-            days_rem = cd_res.get("days_remaining")
-            label = f"{days_rem} days left"
-        elif cd_res.get("status") == "closing_today":
-            days_rem = 0
-            label = "Closing today!"
-        elif cd_res.get("status") == "expired":
-            days_rem = -cd_res.get("days_ago", 1)
-            label = "Expired"
+    cd_res = tool_calculate_deadline_countdown(
+        DeadlineCountdownInput(deadline_date_str=opp.application_deadline)
+    )
+    days_rem = cd_res.get("days_remaining")
+    label = cd_res.get("status_label") or opp.status
 
     return OpportunityDetailResponse(
         id=opp.id,

@@ -4,6 +4,7 @@ Orchestrates multi-turn conversations, tool calling with Groq (Llama-3.3-70b),
 conversation context memory, persistent student preference grounding, and deterministic fallbacks.
 """
 
+import re
 import json
 import logging
 from typing import List, Dict, Any, Optional
@@ -24,6 +25,44 @@ from app.agent.tools import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Minimum semantic similarity threshold required to consider a RAG chunk relevant
+MIN_RAG_SIMILARITY_THRESHOLD = 0.40
+
+def is_conversational_or_greeting(text: str) -> bool:
+    """Detects ordinary conversational greetings, pleasantries, or introductory questions."""
+    clean = re.sub(r"[^\w\s]", "", text.strip().lower())
+    tokens = clean.split()
+    if not tokens:
+        return True
+    
+    greetings = {
+        "hello", "hi", "hey", "habari", "sasa", "jambo", "greetings",
+        "morning", "good morning", "good afternoon", "good evening",
+        "howdy", "sup", "yo", "mambo"
+    }
+    conversational_phrases = [
+        "who are you", "what are you", "what can you do", "introduce yourself",
+        "help me", "tell me about yourself", "how does this work", "how do you work",
+        "what is this", "greatness"
+    ]
+    if clean in greetings or any(phrase in clean for phrase in conversational_phrases):
+        return True
+    if len(tokens) <= 3 and any(t in greetings for t in tokens):
+        return True
+    return False
+
+def get_conversational_greeting_response() -> str:
+    """Returns a friendly, structured conversational introduction without dumping raw documents."""
+    return (
+        "Hello! 👋 I am your **Opportunity Intelligence AI** advisor for university students in Kenya.\n\n"
+        "I can help you:\n"
+        "- 🔍 **Find verified opportunities**: Discover certified scholarships (e.g., HEF, Equity ELP, Chevening), industrial attachments (e.g., Safaricom, KRA), fellowships, and competitions.\n"
+        "- 📋 **Assess eligibility**: Check if your university degree, year of study, and KCSE or university grade meet published requirements.\n"
+        "- ⏰ **Track deadlines**: View deterministic countdowns calculated directly from official application closing dates.\n"
+        "- 📝 **Application checklists**: Generate step-by-step document lists and submission instructions.\n\n"
+        "How can I assist you with your academic or career opportunities today?"
+    )
 
 # In-memory session store for multi-turn short-term conversation context
 # Session ID -> list of {"role": str, "content": str, ...}
@@ -81,64 +120,68 @@ class AgentOrchestrator:
         tool_calls_executed = []
         citations = []
 
+        # 0. Conversational greeting check
+        if is_conversational_or_greeting(user_message):
+            return {
+                "response": get_conversational_greeting_response(),
+                "tool_calls": [],
+                "citations": [],
+                "grounded": True
+            }
+
         # 1. Checklist request
         if "checklist" in lower_msg or "document" in lower_msg or "how to apply" in lower_msg:
-            # Detect opportunity from query
             opp_search = tool_search_opportunities(SearchOpportunitiesInput(query=user_message, top_k=1))
             tool_calls_executed.append({"tool": "search_opportunities", "query": user_message})
             
-            if opp_search.get("results"):
+            if opp_search.get("results") and opp_search["results"][0].get("similarity_score", 0.0) >= 0.35:
                 best_opp = opp_search["results"][0]
-                opp_id = best_opp.get("content_excerpt", "").split("\n")[0]
-                # Find matching opportunity id
-                opp_id_clean = None
                 from app.rag.vector_store import vector_store
                 res = vector_store.search(user_message, top_k=1)
-                if res:
+                if res and res[0].get("similarity_score", 0.0) >= 0.35:
                     opp_id_clean = res[0]["metadata"].get("opportunity_id")
                     url = res[0]["metadata"].get("official_url")
                     title = res[0]["metadata"].get("title")
                     if url:
                         citations.append({"title": title, "url": url})
 
-                if opp_id_clean:
-                    chk_res = tool_generate_application_checklist(GenerateChecklistInput(opportunity_id=opp_id_clean))
-                    tool_calls_executed.append({"tool": "generate_application_checklist", "opportunity_id": opp_id_clean})
-                    
-                    tasks_md = "\n".join([f"- [ ] {t['task']}" for t in chk_res.get("tasks", [])])
-                    reply = (
-                        f"### Verified Application Checklist for {title}\n\n"
-                        f"Based on verified records, here are the required documents and application steps:\n\n"
-                        f"{tasks_md}\n\n"
-                        f"🔗 **Official Application Portal:** [{title}]({url})\n\n"
-                        f"> ⚠️ *Always verify current submission procedures directly on the official portal.*"
-                    )
-                    return {
-                        "response": reply,
-                        "tool_calls": tool_calls_executed,
-                        "citations": citations,
-                        "grounded": True
-                    }
+                    if opp_id_clean:
+                        chk_res = tool_generate_application_checklist(GenerateChecklistInput(opportunity_id=opp_id_clean))
+                        tool_calls_executed.append({"tool": "generate_application_checklist", "opportunity_id": opp_id_clean})
+                        
+                        tasks_md = "\n".join([f"- [ ] {t['task']}" for t in chk_res.get("tasks", [])])
+                        reply = (
+                            f"### Verified Application Checklist for {title}\n\n"
+                            f"Based on verified records, here are the required documents and application steps:\n\n"
+                            f"{tasks_md}\n\n"
+                            f"🔗 **Official Application Portal:** [{title}]({url})\n\n"
+                            f"> ⚠️ *Always verify current submission procedures directly on the official portal.*"
+                        )
+                        return {
+                            "response": reply,
+                            "tool_calls": tool_calls_executed,
+                            "citations": citations,
+                            "grounded": True
+                        }
 
         # 2. Eligibility evaluation request
         if "eligible" in lower_msg or "qualify" in lower_msg:
             search_res = tool_search_opportunities(SearchOpportunitiesInput(query=user_message, top_k=1))
             tool_calls_executed.append({"tool": "search_opportunities", "query": user_message})
 
-            if search_res.get("results"):
+            if search_res.get("results") and search_res["results"][0].get("similarity_score", 0.0) >= 0.35:
                 opp_title = search_res["results"][0].get("title")
                 opp_url = search_res["results"][0].get("official_url")
                 if opp_url:
                     citations.append({"title": opp_title, "url": opp_url})
 
-                # Check if student profile parameters are available
                 deg = student_profile.get("degree_level", "Undergraduate") if student_profile else "Undergraduate"
                 field = student_profile.get("field_of_study", "Computer Science") if student_profile else "Computer Science"
                 yr = student_profile.get("year_of_study", 3) if student_profile else 3
 
                 from app.rag.vector_store import vector_store
                 res = vector_store.search(user_message, top_k=1)
-                if res:
+                if res and res[0].get("similarity_score", 0.0) >= 0.35:
                     target_id = res[0]["metadata"].get("opportunity_id")
                     eval_res = tool_assess_eligibility(AssessEligibilityInput(
                         opportunity_id=target_id,
@@ -167,42 +210,79 @@ class AgentOrchestrator:
                         "grounded": True
                     }
 
-        # 3. Default: General Knowledge Search
-        search_res = tool_search_opportunities(SearchOpportunitiesInput(query=user_message, top_k=3))
+        # 3. Opportunity Search with Semantic Threshold & Deduplication
+        search_res = tool_search_opportunities(SearchOpportunitiesInput(query=user_message, top_k=4))
         tool_calls_executed.append({"tool": "search_opportunities", "query": user_message})
 
-        if not search_res.get("results"):
+        raw_results = search_res.get("results", [])
+        # Filter by minimum relevance threshold
+        valid_results = [r for r in raw_results if r.get("similarity_score", 0.0) >= MIN_RAG_SIMILARITY_THRESHOLD]
+
+        if not valid_results:
             return {
                 "response": (
-                    "I cannot find verified records matching your specific question in our directory of approved Kenyan opportunities. "
-                    "To avoid providing inaccurate information, I recommend checking official university notices, the Ministry of Education (HEF), or company career portals directly."
+                    f"I could not find verified records matching your specific question ('{user_message}') in our directory of approved Kenyan opportunities.\n\n"
+                    "To prevent inaccurate guidance, I only provide details confirmed against official university notices, government portals (HEF, PSC), or certified company sites.\n\n"
+                    "💡 **Try asking about:**\n"
+                    "- *Safaricom industrial attachment eligibility*\n"
+                    "- *Higher Education Financing (HEF) scholarship and loan applications*\n"
+                    "- *KRA Graduate Trainee qualifications*\n"
+                    "- *Chevening UK scholarship requirements for Kenyan students*"
                 ),
                 "tool_calls": tool_calls_executed,
                 "citations": [],
                 "grounded": True
             }
 
-        top_results = search_res["results"]
-        excerpts = []
-        for r in top_results:
-            title = r.get("title")
-            provider = r.get("provider")
-            url = r.get("official_url")
-            deadline = r.get("deadline")
-            section = r.get("section")
-            if url and not any(c["url"] == url for c in citations):
-                citations.append({"title": title, "url": url})
+        # Deduplicate and consolidate chunks by opportunity title
+        opp_groups: Dict[str, Dict[str, Any]] = {}
+        for r in valid_results:
+            title_key = r.get("title") or "Opportunity"
+            if title_key not in opp_groups:
+                opp_groups[title_key] = {
+                    "title": r.get("title"),
+                    "provider": r.get("provider"),
+                    "category": r.get("category"),
+                    "deadline": r.get("deadline"),
+                    "official_url": r.get("official_url"),
+                    "sections": []
+                }
             
-            excerpts.append(
+            raw_text = r.get("content_excerpt", "").strip()
+            clean_lines = [
+                line.strip() for line in raw_text.split("\n")
+                if line.strip() and not line.strip().startswith("#") and not line.strip().startswith("---")
+            ]
+            clean_excerpt = " ".join(clean_lines[:3])
+            if len(clean_excerpt) > 240:
+                clean_excerpt = clean_excerpt[:240] + "..."
+            
+            sec_name = r.get("section") or "Overview"
+            opp_groups[title_key]["sections"].append((sec_name, clean_excerpt))
+
+            url = r.get("official_url")
+            if url and not any(c["url"] == url for c in citations):
+                citations.append({"title": r.get("title"), "url": url})
+
+        opp_cards = []
+        for opp in opp_groups.values():
+            title = opp["title"]
+            url = opp["official_url"]
+            provider = opp["provider"]
+            deadline = opp["deadline"] or "Rolling / Unspecified"
+            
+            highlights_md = "\n".join([f"  - **{sec}:** {txt}" for sec, txt in opp["sections"][:2]])
+            
+            opp_cards.append(
                 f"#### [{title}]({url})\n"
                 f"- **Provider:** {provider} | **Deadline:** {deadline}\n"
-                f"- **Details ({section}):**\n{r.get('content_excerpt')[:300]}..."
+                f"- **Verified Details:**\n{highlights_md}"
             )
 
         reply = (
-            f"Here is what the verified official Kenyan records indicate regarding your question:\n\n"
-            + "\n\n".join(excerpts) +
-            "\n\n> 🔍 *All details above are grounded directly in official published guidelines.*"
+            "Here is what our verified Kenyan opportunity records indicate regarding your inquiry:\n\n"
+            + "\n\n".join(opp_cards) +
+            "\n\n> 🔍 *All details above are certified against official publisher portals.*"
         )
 
         return {
@@ -230,6 +310,19 @@ class AgentOrchestrator:
             SESSION_CONTEXT_CACHE[session_id] = []
 
         history = SESSION_CONTEXT_CACHE[session_id]
+
+        # Fast path for conversational greetings
+        if is_conversational_or_greeting(message):
+            greeting_resp = get_conversational_greeting_response()
+            history.append({"role": "user", "content": message})
+            history.append({"role": "assistant", "content": greeting_resp})
+            SESSION_CONTEXT_CACHE[session_id] = history[-MAX_SESSION_HISTORY_TURNS:]
+            return {
+                "response": greeting_resp,
+                "tool_calls": [],
+                "citations": [],
+                "grounded": True
+            }
 
         # Check if Groq client is configured
         client = self.groq_client

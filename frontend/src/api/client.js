@@ -1,14 +1,25 @@
 /**
  * Opportunity Intelligence AI - Frontend API Client
  * Connects React UI to FastAPI backend endpoints.
+ * Supports JWT authentication headers and role-based administrator actions.
  */
 
 const BASE_URL = '/api/v1';
+const TOKEN_KEY = 'oi_access_token';
+
+export const getToken = () => localStorage.getItem(TOKEN_KEY);
+export const setToken = (token) => {
+  if (token) localStorage.setItem(TOKEN_KEY, token);
+  else localStorage.removeItem(TOKEN_KEY);
+};
 
 async function request(endpoint, options = {}) {
   const url = `${BASE_URL}${endpoint}`;
+  const token = getToken();
+
   const headers = {
     'Content-Type': 'application/json',
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
     ...(options.headers || {}),
   };
 
@@ -26,7 +37,24 @@ async function request(endpoint, options = {}) {
 }
 
 export const api = {
-  // 1. Opportunities Discovery
+  // 1. Authentication & Role Authorization
+  login: (email, password) => {
+    return request('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+  },
+
+  register: (userData) => {
+    return request('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(userData),
+    });
+  },
+
+  getMe: () => request('/auth/me'),
+
+  // 2. Opportunities Discovery (Public & Filtered)
   getOpportunities: (params = {}) => {
     const query = new URLSearchParams();
     if (params.category) query.append('category', params.category);
@@ -39,7 +67,7 @@ export const api = {
 
   getOpportunityDetails: (id) => request(`/opportunities/${id}`),
 
-  // 2. AI Assistant Chat
+  // 3. AI Assistant Chat
   chat: (message, sessionId = 'default_session', studentId = null) => {
     return request('/chat', {
       method: 'POST',
@@ -51,7 +79,7 @@ export const api = {
     });
   },
 
-  // 3. Deterministic Eligibility Checker
+  // 4. Deterministic Eligibility Checker
   assessEligibility: (data) => {
     return request('/agent/assess-eligibility', {
       method: 'POST',
@@ -59,7 +87,7 @@ export const api = {
     });
   },
 
-  // 4. Student Profile Management
+  // 5. Student Profile Management
   getProfile: (email) => request(`/profile/${encodeURIComponent(email)}`),
   saveProfile: (profileData) => {
     return request('/profile', {
@@ -73,7 +101,7 @@ export const api = {
     });
   },
 
-  // 5. Application Tracking & Checklists
+  // 6. Application Tracking & Checklists
   saveToTracker: (studentId, opportunityId, stage = 'Saved', notes = '') => {
     return request('/tracker/save', {
       method: 'POST',
@@ -124,4 +152,32 @@ export const api = {
   },
 
   getDashboardStats: (studentId) => request(`/tracker/${studentId}/stats`),
+
+  // 7. Administrator Management (Guarded by require_admin on backend)
+  adminCreateOpportunity: (data) => {
+    return request('/admin/opportunities', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  adminUpdateOpportunity: (id, data) => {
+    return request(`/admin/opportunities/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  adminVerifyOpportunity: (id, verificationData) => {
+    return request(`/admin/opportunities/${id}/verify`, {
+      method: 'POST',
+      body: JSON.stringify(verificationData),
+    });
+  },
+
+  adminDeleteOpportunity: (id) => {
+    return request(`/admin/opportunities/${id}`, {
+      method: 'DELETE',
+    });
+  },
 };

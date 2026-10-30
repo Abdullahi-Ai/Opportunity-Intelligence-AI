@@ -5,6 +5,39 @@ from app.agent.orchestrator import agent_orchestrator, SESSION_CONTEXT_CACHE
 
 client = TestClient(app)
 
+def test_conversational_greetings():
+    """Verify that greetings return conversational responses without querying or dumping raw chunks."""
+    greetings = ["hello there", "hi", "Habari", "who are you"]
+    for greet in greetings:
+        res = agent_orchestrator.chat(message=greet, session_id=f"test_greet_{greet.replace(' ', '_')}")
+        assert res["grounded"] is True
+        assert len(res["tool_calls"]) == 0
+        assert "Opportunity Intelligence AI" in res["response"]
+        assert "Kenya" in res["response"]
+        # Ensure raw chunk metadata markers are not in conversational greeting
+        assert "#### [Kenya Revenue Authority" not in res["response"]
+        assert "#### [" not in res["response"]
+
+def test_opportunity_query_deduplication():
+    """Verify that RAG responses deduplicate multiple chunks from the same opportunity."""
+    res = agent_orchestrator.chat(
+        message="What are the details for Safaricom industrial attachment?",
+        session_id="test_dedup_session"
+    )
+    assert res["grounded"] is True
+    # The title should appear once as a heading, not duplicated multiple times
+    assert res["response"].count("#### [Safaricom") <= 1
+    assert len(res["citations"]) > 0
+
+def test_out_of_domain_and_insufficient_evidence():
+    """Verify that irrelevant queries return a safe, grounded message instead of hallucinating."""
+    res = agent_orchestrator.chat(
+        message="Can you teach me how to build a rocket on Mars using quantum physics?",
+        session_id="test_out_of_domain"
+    )
+    assert res["grounded"] is True
+    assert "could not find verified records" in res["response"].lower() or "cannot find verified" in res["response"].lower()
+
 def test_tool_dispatch_execution():
     # 1. Test search tool execution
     search_res = agent_orchestrator.execute_tool(
@@ -89,15 +122,14 @@ def test_agent_multi_turn_context_memory():
     )
     assert len(SESSION_CONTEXT_CACHE[session_id]) >= 4
 
-def test_chat_api_endpoint():
+def test_chat_api_endpoint_greeting():
+    """Test greeting over HTTP chat endpoint."""
     payload = {
-        "message": "What opportunities exist for undergraduate tech students in Kenya?",
-        "session_id": "api_test_session"
+        "message": "hello there",
+        "session_id": "api_test_greeting"
     }
     response = client.post("/api/v1/chat", json=payload)
     assert response.status_code == 200
     data = response.json()
-    assert "response" in data
-    assert len(data["response"]) > 50
-    assert data["session_id"] == "api_test_session"
-    assert "timestamp" in data
+    assert "Opportunity Intelligence AI" in data["response"]
+    assert len(data.get("tool_calls", [])) == 0

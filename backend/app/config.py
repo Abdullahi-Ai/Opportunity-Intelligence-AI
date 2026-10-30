@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     PORT: int = 8000
     HOST: str = "0.0.0.0"
     SECRET_KEY: str = "super_secret_development_key_not_for_production_32chars"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+    ADMIN_REGISTRATION_SECRET: str = "kenya_admin_secret_key_2026"
     
     # LLM Settings
     GROQ_API_KEY: str = Field(default="", description="Groq Cloud API Key")

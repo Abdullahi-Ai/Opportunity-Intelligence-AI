@@ -10,7 +10,7 @@ import {
   RefreshCw, 
   AlertCircle 
 } from 'lucide-react';
-import { api } from './api/client';
+import { api, getToken, setToken } from './api/client';
 import Navbar from './components/Navbar';
 import OpportunityCard from './components/OpportunityCard';
 import OpportunityModal from './components/OpportunityModal';
@@ -18,6 +18,8 @@ import EligibilityChecker from './components/EligibilityChecker';
 import AIAssistantDrawer from './components/AIAssistantDrawer';
 import ApplicationTracker from './components/ApplicationTracker';
 import ProfileModal from './components/ProfileModal';
+import AuthModal from './components/AuthModal';
+import AdminPortalModal from './components/AdminPortalModal';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('discover'); // 'discover' | 'tracker'
@@ -32,20 +34,9 @@ export default function App() {
   const [selectedCategory, setSelectedCategory] = useState('');
   const [isOpenOnly, setIsOpenOnly] = useState(false);
 
-  // Student Profile State
-  const [student, setStudent] = useState({
-    id: 'brian-demo-id',
-    email: 'brian.kiprono@students.uonbi.ac.ke',
-    full_name: 'Brian Kiprono',
-    university: 'University of Nairobi',
-    field_of_study: 'Computer Science',
-    degree_level: 'Undergraduate',
-    year_of_study: 3,
-    county_of_origin: 'Uasin Gishu',
-    gpa_or_grade: 'Upper Second (2:1)',
-    preferred_categories: 'Internship, Graduate Trainee',
-  });
-
+  // Authenticated User & Profile State
+  const [user, setUser] = useState(null);
+  const [student, setStudent] = useState(null);
   const [trackedIds, setTrackedIds] = useState(new Set());
 
   // Modals & Drawers
@@ -53,6 +44,57 @@ export default function App() {
   const [eligibilityOpportunity, setEligibilityOpportunity] = useState(null);
   const [isAssistantOpen, setIsAssistantOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [isAdminOpen, setIsAdminOpen] = useState(false);
+
+  // Check current session on mount
+  useEffect(() => {
+    const initAuth = async () => {
+      const token = getToken();
+      if (!token) return;
+      try {
+        const me = await api.getMe();
+        handleAuthSuccess(me);
+      } catch (err) {
+        console.warn('Session expired or invalid:', err);
+        setToken(null);
+        setUser(null);
+        setStudent(null);
+      }
+    };
+    initAuth();
+  }, []);
+
+  const handleAuthSuccess = (authenticatedUser) => {
+    setUser(authenticatedUser);
+    if (authenticatedUser.student_profile) {
+      setStudent({
+        id: authenticatedUser.student_profile.id,
+        email: authenticatedUser.email,
+        full_name: authenticatedUser.full_name,
+        university: authenticatedUser.student_profile.university,
+        field_of_study: authenticatedUser.student_profile.field_of_study,
+        degree_level: authenticatedUser.student_profile.degree_level,
+        year_of_study: 3,
+      });
+    } else {
+      setStudent({
+        id: authenticatedUser.id,
+        email: authenticatedUser.email,
+        full_name: authenticatedUser.full_name,
+        university: 'Kenyan Institution',
+        field_of_study: 'General',
+        degree_level: 'Undergraduate',
+        year_of_study: 1,
+      });
+    }
+  };
+
+  const handleLogout = () => {
+    setUser(null);
+    setStudent(null);
+    setTrackedIds(new Set());
+  };
 
   // Load Opportunities
   const loadOpportunities = async () => {
@@ -97,6 +139,12 @@ export default function App() {
   };
 
   const handleSaveToTracker = async (opp) => {
+    if (!user) {
+      alert('Please sign in or create an account to save opportunities to your personal application tracker.');
+      setIsAuthOpen(true);
+      return;
+    }
+
     try {
       await api.saveToTracker(student.id, opp.id, 'Saved', 'Saved via Opportunity Discovery Explorer');
       setTrackedIds((prev) => new Set([...prev, opp.id]));
@@ -122,34 +170,34 @@ export default function App() {
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
+        user={user}
         student={student}
-        onOpenProfile={() => setIsProfileOpen(true)}
+        onOpenProfile={() => (user ? setIsProfileOpen(true) : setIsAuthOpen(true))}
         onOpenAssistant={() => setIsAssistantOpen(true)}
+        onOpenAuth={() => setIsAuthOpen(true)}
+        onOpenAdmin={() => setIsAdminOpen(true)}
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {activeTab === 'discover' ? (
           <div className="space-y-6">
             
-            {/* Hero / Banner Section */}
-            <div className="rounded-3xl bg-gradient-to-r from-brand-900 via-brand-800 to-brand-700 text-white p-6 sm:p-8 shadow-xl relative overflow-hidden">
+            {/* Hero / Header Section */}
+            <div className="bg-gradient-to-r from-brand-700 via-brand-800 to-slate-900 rounded-3xl p-6 sm:p-10 text-white shadow-xl relative overflow-hidden">
               <div className="relative z-10 max-w-2xl space-y-3">
-                <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 text-xs font-semibold text-brand-100">
+                <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md text-brand-100 text-xs font-semibold">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>100% Grounded in Official Kenyan Portals</span>
+                  <span>Verified Educational & Career Intelligence</span>
                 </div>
-                
-                <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight leading-tight">
-                  Discover verified early-career opportunities tailored for you.
+                <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight">
+                  Discover Opportunities Built for Kenyan Students
                 </h1>
-                
                 <p className="text-xs sm:text-sm text-brand-100/90 leading-relaxed">
                   Search scholarships, industrial attachments, and graduate trainee schemes with verified criteria, deterministic deadline countdowns, and automatic checklist preparation.
                 </p>
 
-                {/* Search Bar Input */}
+                {/* Natural Language / Keyword Search Bar */}
                 <form onSubmit={handleSearchSubmit} className="pt-2 flex flex-col sm:flex-row gap-2 max-w-xl">
                   <div className="relative flex-1">
                     <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
@@ -170,7 +218,7 @@ export default function App() {
                 </form>
               </div>
 
-              {/* Decorative Background Elements */}
+              {/* Decorative Compass watermark */}
               <div className="absolute right-0 bottom-0 opacity-10 pointer-events-none transform translate-x-10 translate-y-10">
                 <Compass className="w-72 h-72 text-white" />
               </div>
@@ -178,20 +226,19 @@ export default function App() {
 
             {/* Filter Bar */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-1">
-              
               {/* Category Pills */}
               <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 max-w-full">
-                {categories.map((c) => (
+                {categories.map((cat) => (
                   <button
-                    key={c.value}
-                    onClick={() => setSelectedCategory(c.value)}
+                    key={cat.value}
+                    onClick={() => setSelectedCategory(cat.value)}
                     className={`whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${
-                      selectedCategory === c.value
+                      selectedCategory === cat.value
                         ? 'bg-brand-600 text-white shadow-sm'
                         : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
                     }`}
                   >
-                    {c.label}
+                    {cat.label}
                   </button>
                 ))}
               </div>
@@ -209,10 +256,9 @@ export default function App() {
                   Show Open Only
                 </label>
               </div>
-
             </div>
 
-            {/* Opportunity Grid */}
+            {/* Opportunities Grid / Loading / Error State */}
             {loading ? (
               <div className="py-20 text-center text-slate-500">
                 <RefreshCw className="w-8 h-8 animate-spin mx-auto text-brand-600 mb-2" />
@@ -261,10 +307,9 @@ export default function App() {
             onOpenAssistant={() => setIsAssistantOpen(true)}
           />
         )}
-
       </main>
 
-      {/* Floating Action Button for Assistant */}
+      {/* Floating AI Advisor Trigger Button */}
       <button
         onClick={() => setIsAssistantOpen(true)}
         className="fixed bottom-6 right-6 z-40 p-3.5 bg-gradient-to-r from-brand-600 to-brand-700 hover:from-brand-700 hover:to-brand-800 text-white rounded-full shadow-xl hover:shadow-2xl transition-all flex items-center space-x-2"
@@ -307,6 +352,21 @@ export default function App() {
           setTrackedIds(new Set());
           alert('Profile and tracked application data have been deleted.');
         }}
+      />
+
+      <AuthModal
+        isOpen={isAuthOpen}
+        onClose={() => setIsAuthOpen(false)}
+        user={user}
+        onAuthSuccess={handleAuthSuccess}
+        onLogout={handleLogout}
+      />
+
+      <AdminPortalModal
+        isOpen={isAdminOpen}
+        onClose={() => setIsAdminOpen(false)}
+        opportunities={opportunities}
+        onOpportunityUpdated={loadOpportunities}
       />
 
       {/* Footer */}

@@ -1,7 +1,16 @@
 import React from 'react';
-import { Compass, BookmarkCheck, Bot, User, ShieldCheck } from 'lucide-react';
+import { Compass, BookmarkCheck, Bot, User, ShieldCheck, LogIn, Lock } from 'lucide-react';
 
-export default function Navbar({ activeTab, setActiveTab, student, onOpenProfile, onOpenAssistant }) {
+export default function Navbar({
+  activeTab,
+  setActiveTab,
+  user,
+  student,
+  onOpenProfile,
+  onOpenAssistant,
+  onOpenAuth,
+  onOpenAdmin,
+}) {
   return (
     <header className="sticky top-0 z-30 bg-white border-b border-slate-200 shadow-sm">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -47,6 +56,16 @@ export default function Navbar({ activeTab, setActiveTab, student, onOpenProfile
               <span>My Applications</span>
             </button>
 
+            {user?.role === 'admin' && (
+              <button
+                onClick={onOpenAdmin}
+                className="flex items-center space-x-1.5 px-3 py-2 rounded-lg text-sm font-semibold bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 transition-colors"
+              >
+                <ShieldCheck className="w-4 h-4 text-amber-600" />
+                <span>Admin Portal</span>
+              </button>
+            )}
+
             <button
               onClick={onOpenAssistant}
               className="flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium bg-gradient-to-r from-brand-600 to-brand-700 text-white shadow-sm hover:from-brand-700 hover:to-brand-800 transition-all hover:shadow"
@@ -56,24 +75,41 @@ export default function Navbar({ activeTab, setActiveTab, student, onOpenProfile
             </button>
           </nav>
 
-          {/* Student Profile Pill */}
-          <div className="flex items-center pl-2">
-            <button
-              onClick={onOpenProfile}
-              className="flex items-center space-x-2.5 p-1.5 sm:px-3 sm:py-1.5 rounded-full border border-slate-200 hover:border-brand-300 hover:bg-slate-50 transition-all"
-            >
-              <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-700 font-semibold flex items-center justify-center text-xs">
-                {student?.full_name ? student.full_name.charAt(0).toUpperCase() : <User className="w-4 h-4" />}
-              </div>
-              <div className="text-left hidden md:block">
-                <p className="text-xs font-semibold text-slate-800 leading-tight">
-                  {student?.full_name || 'Set Up Profile'}
-                </p>
-                <p className="text-[10px] text-slate-500 leading-tight">
-                  {student?.university || 'Kenyan University'}
-                </p>
-              </div>
-            </button>
+          {/* Account & Profile Control */}
+          <div className="flex items-center pl-2 space-x-2">
+            {user ? (
+              <button
+                onClick={onOpenAuth}
+                className="flex items-center space-x-2.5 p-1.5 sm:px-3 sm:py-1.5 rounded-full border border-slate-200 hover:border-brand-300 hover:bg-slate-50 transition-all"
+              >
+                <div className={`w-8 h-8 rounded-full font-semibold flex items-center justify-center text-xs ${
+                  user.role === 'admin' ? 'bg-amber-100 text-amber-800' : 'bg-brand-100 text-brand-700'
+                }`}>
+                  {user.full_name ? user.full_name.charAt(0).toUpperCase() : <User className="w-4 h-4" />}
+                </div>
+                <div className="text-left hidden md:block">
+                  <div className="flex items-center space-x-1">
+                    <p className="text-xs font-semibold text-slate-800 leading-tight">
+                      {user.full_name}
+                    </p>
+                    {user.role === 'admin' && (
+                      <span className="text-[9px] bg-amber-100 text-amber-800 px-1 rounded font-bold">Admin</span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-slate-500 leading-tight">
+                    {user.student_profile?.university || (user.role === 'admin' ? 'Platform Administrator' : 'Student')}
+                  </p>
+                </div>
+              </button>
+            ) : (
+              <button
+                onClick={onOpenAuth}
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border border-brand-200 bg-brand-50 text-brand-700 hover:bg-brand-100 transition-colors text-xs font-semibold"
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                <span>Sign In / Register</span>
+              </button>
+            )}
           </div>
 
         </div>
