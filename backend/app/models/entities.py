@@ -37,6 +37,7 @@ class User(Base):
 
     # Relationships
     student_profile = relationship("StudentProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    conversations = relationship("Conversation", back_populates="user", cascade="all, delete-orphan")
 
 class StudentProfile(Base):
     __tablename__ = "student_profiles"
@@ -114,3 +115,35 @@ class ApplicationChecklist(Base):
 
     # Relationships
     tracked_application = relationship("TrackedApplication", back_populates="checklists")
+
+class Conversation(Base):
+    __tablename__ = "conversations"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    anonymous_session_id = Column(String(100), nullable=True, index=True)
+    title = Column(String(255), default="New Conversation", nullable=False)
+    summary = Column(Text, nullable=True)  # Structured summary of progress and student facts
+    state_data = Column(Text, nullable=True)  # JSON-encoded conversation state
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    user = relationship("User", back_populates="conversations")
+    messages = relationship("ConversationMessage", back_populates="conversation", cascade="all, delete-orphan", order_by="ConversationMessage.created_at")
+
+class ConversationMessage(Base):
+    __tablename__ = "conversation_messages"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    conversation_id = Column(String(36), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
+    role = Column(String(20), nullable=False)  # "user", "assistant", "system"
+    content = Column(Text, nullable=False)
+    intent = Column(String(50), nullable=True)
+    citations = Column(Text, nullable=True)  # JSON list of citations
+    tool_calls = Column(Text, nullable=True)  # JSON list of tool executions
+    metadata_json = Column(Text, nullable=True)  # Extra context / state
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    conversation = relationship("Conversation", back_populates="messages")

@@ -67,15 +67,58 @@ export const api = {
 
   getOpportunityDetails: (id) => request(`/opportunities/${id}`),
 
-  // 3. AI Assistant Chat
-  chat: (message, sessionId = 'default_session', studentId = null) => {
+  // 3. AI Assistant Chat & Memory Management
+  chat: (message, conversationIdOrSession = null, sessionId = null, studentId = null) => {
+    let conversationId = null;
+    let actualSessionId = sessionId;
+    let actualStudentId = studentId;
+
+    if (conversationIdOrSession) {
+      if (
+        conversationIdOrSession.startsWith('conv-') || 
+        (conversationIdOrSession.includes('-') && conversationIdOrSession.length >= 32)
+      ) {
+        conversationId = conversationIdOrSession;
+      } else if (!sessionId) {
+        actualSessionId = conversationIdOrSession;
+      } else {
+        conversationId = conversationIdOrSession;
+      }
+    }
+
     return request('/chat', {
       method: 'POST',
       body: JSON.stringify({
         message,
-        session_id: sessionId,
-        student_id: studentId,
+        conversation_id: conversationId,
+        session_id: actualSessionId || 'default_session',
+        student_id: actualStudentId,
       }),
+    });
+  },
+
+  getConversations: (sessionId = null) => {
+    const q = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : '';
+    return request(`/conversations${q}`);
+  },
+
+  getConversationHistory: (conversationId, sessionId = null) => {
+    const q = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : '';
+    return request(`/conversations/${encodeURIComponent(conversationId)}${q}`);
+  },
+
+  renameConversation: (conversationId, title, sessionId = null) => {
+    const q = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : '';
+    return request(`/conversations/${encodeURIComponent(conversationId)}${q}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ title }),
+    });
+  },
+
+  deleteConversation: (conversationId, sessionId = null) => {
+    const q = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : '';
+    return request(`/conversations/${encodeURIComponent(conversationId)}${q}`, {
+      method: 'DELETE',
     });
   },
 

@@ -9,15 +9,20 @@ import {
   ShieldCheck, 
   User, 
   Trash2,
+  PlusCircle,
+  HelpCircle,
+  Compass,
   CheckCircle2,
   FileCheck
 } from 'lucide-react';
 import { api } from '../api/client';
 
 export default function AIAdvisorWorkspace({ student, user }) {
+  const [conversationId, setConversationId] = useState(() => localStorage.getItem('oi_active_conversation_id') || null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [activeMemory, setActiveMemory] = useState(null);
   const messagesEndRef = useRef(null);
 
   const starterCards = [
@@ -43,6 +48,13 @@ export default function AIAdvisorWorkspace({ student, user }) {
     }
   ];
 
+  const clarificationChips = [
+    { label: '🎓 Scholarships & Bursaries', query: 'Undergraduate scholarships in Kenya' },
+    { label: '🏢 Industrial Attachments', query: 'Industrial attachments and internships in Kenya' },
+    { label: '📋 Check My Eligibility', query: 'Check my eligibility for attachments' },
+    { label: '⏳ Closing Soonest (Deadlines)', query: 'Which opportunity has the earliest deadline?' }
+  ];
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -50,6 +62,38 @@ export default function AIAdvisorWorkspace({ student, user }) {
   useEffect(() => {
     scrollToBottom();
   }, [messages, loading]);
+
+  // Load active conversation from database if conversationId exists
+  useEffect(() => {
+    let isMounted = true;
+    async function loadSavedConversation() {
+      if (!conversationId) return;
+      try {
+        const history = await api.getConversationHistory(conversationId);
+        if (isMounted && history && history.messages && history.messages.length > 0) {
+          const formatted = history.messages.map((m) => ({
+            role: m.sender === 'user' ? 'user' : 'assistant',
+            content: m.message_text,
+            citations: m.citations || [],
+            tool_calls: m.tool_calls || [],
+            intent: m.intent || null,
+          }));
+          setMessages(formatted);
+          if (history.state?.student_memory) {
+            setActiveMemory(history.state.student_memory);
+          }
+        }
+      } catch (err) {
+        console.warn('Could not restore prior conversation, starting fresh session:', err);
+        localStorage.removeItem('oi_active_conversation_id');
+        setConversationId(null);
+      }
+    }
+    loadSavedConversation();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const handleSendMessage = async (queryText = null) => {
     const textToSend = queryText || input;
@@ -62,13 +106,24 @@ export default function AIAdvisorWorkspace({ student, user }) {
 
     try {
       const studentId = student?.id || user?.id || 'guest_session';
-      const data = await api.chat(textToSend, `workspace_session_${studentId}`, studentId);
+      const data = await api.chat(
+        textToSend,
+        conversationId,
+        `workspace_session_${studentId}`,
+        studentId
+      );
+
+      if (data.conversation_id) {
+        setConversationId(data.conversation_id);
+        localStorage.setItem('oi_active_conversation_id', data.conversation_id);
+      }
 
       const assistantMsg = {
         role: 'assistant',
         content: data.response,
         citations: data.citations || [],
         tool_calls: data.tool_calls || [],
+        intent: data.intent || null,
       };
       setMessages((prev) => [...prev, assistantMsg]);
     } catch (err) {
@@ -85,9 +140,23 @@ export default function AIAdvisorWorkspace({ student, user }) {
     }
   };
 
-  const handleClearChat = () => {
-    if (messages.length > 0 && window.confirm('Clear conversation history?')) {
-      setMessages([]);
+  const handleNewChat = () => {
+    localStorage.removeItem('oi_active_conversation_id');
+    setConversationId(null);
+    setMessages([]);
+    setActiveMemory(null);
+  };
+
+  const handleClearChat = async () => {
+    if (messages.length > 0 && window.confirm('Clear current conversation?')) {
+      if (conversationId) {
+        try {
+          await api.deleteConversation(conversationId);
+        } catch (e) {
+          console.warn('Could not delete remote conversation:', e);
+        }
+      }
+      handleNewChat();
     }
   };
 
@@ -96,7 +165,7 @@ export default function AIAdvisorWorkspace({ student, user }) {
   return (
     <div className="flex flex-col h-[calc(100vh-7rem)] bg-white rounded-3xl border border-slate-200/80 shadow-sm overflow-hidden animate-in fade-in duration-200">
       
-      {/* Top Bar: Model Indicator & Controls (Image 3 Header) */}
+      {/* Top Bar: Model Indicator & Controls */}
       <div className="h-14 px-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50 flex-shrink-0">
         <div className="flex items-center space-x-2.5">
           <div className="w-7 h-7 rounded-xl bg-gradient-to-tr from-brand-600 to-indigo-600 flex items-center justify-center text-white shadow-sm">
@@ -110,22 +179,34 @@ export default function AIAdvisorWorkspace({ student, user }) {
           </div>
         </div>
 
-        {messages.length > 0 && (
+        <div className="flex items-center space-x-2">
           <button
-            onClick={handleClearChat}
-            className="flex items-center space-x-1 text-slate-400 hover:text-slate-600 text-xs px-2.5 py-1 rounded-lg hover:bg-slate-100 transition-colors"
+            onClick={handleNewChat}
+            className="flex items-center space-x-1.5 text-xs font-semibold px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-slate-700 hover:text-brand-600 hover:border-brand-200 shadow-2xs transition-colors"
+            title="Start a fresh conversation"
           >
-            <Trash2 className="w-3.5 h-3.5" />
-            <span>Clear Chat</span>
+            <PlusCircle className="w-3.5 h-3.5 text-brand-600" />
+            <span>New Chat</span>
           </button>
-        )}
+
+          {messages.length > 0 && (
+            <button
+              onClick={handleClearChat}
+              className="flex items-center space-x-1 text-slate-400 hover:text-rose-600 text-xs px-2.5 py-1.5 rounded-xl hover:bg-rose-50 transition-colors"
+              title="Delete conversation"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Clear</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Main Area: Empty State OR Message Stream */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
         
         {messages.length === 0 ? (
-          /* Empty State Inspired Directly by Reference 3 (Spark.AI) */
+          /* Empty State */
           <div className="max-w-2xl mx-auto py-10 space-y-8 text-center animate-in fade-in zoom-in-95 duration-200">
             
             <div className="space-y-3">
@@ -140,7 +221,7 @@ export default function AIAdvisorWorkspace({ student, user }) {
               </p>
             </div>
 
-            {/* Central Prompt Input Box (Reference 3) */}
+            {/* Central Prompt Input Box */}
             <div className="bg-slate-50 border border-slate-200 rounded-3xl p-4 shadow-sm text-left space-y-3">
               <textarea
                 rows={3}
@@ -175,10 +256,28 @@ export default function AIAdvisorWorkspace({ student, user }) {
               </div>
             </div>
 
-            {/* Starter Suggestion Cards (Reference 3) */}
+            {/* Quick Clarification Chips */}
+            <div className="space-y-2 text-left">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                Quick Category Shortcuts:
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {clarificationChips.map((chip, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => handleSendMessage(chip.query)}
+                    className="px-3 py-1.5 rounded-full bg-slate-100 hover:bg-brand-50 hover:text-brand-700 hover:border-brand-300 border border-slate-200/80 text-xs font-medium text-slate-700 transition-all shadow-2xs"
+                  >
+                    {chip.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Starter Suggestion Cards */}
             <div className="space-y-3 text-left">
               <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                Suggested Guidance Prompts:
+                Featured Verified Opportunities:
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {starterCards.map((card, idx) => (
@@ -221,7 +320,7 @@ export default function AIAdvisorWorkspace({ student, user }) {
                   }`}
                 >
                   {msg.role === 'assistant' ? (
-                    <div className="space-y-2 text-slate-800">
+                    <div className="space-y-3 text-slate-800">
                       <ReactMarkdown
                         components={{
                           h3: ({ node, ...props }) => <h3 className="font-bold text-sm text-slate-900 mt-3 mb-1.5" {...props} />,
@@ -248,9 +347,25 @@ export default function AIAdvisorWorkspace({ student, user }) {
                         {msg.content}
                       </ReactMarkdown>
 
+                      {/* Interactive Clarification Chips for Ambiguous Responses */}
+                      {msg.intent === 'ambiguous_incomplete' && (
+                        <div className="pt-2 border-t border-slate-200/70 flex flex-wrap gap-1.5">
+                          <span className="text-[10px] font-bold text-slate-400 block w-full">Choose an option to proceed:</span>
+                          {clarificationChips.map((chip, cIdx) => (
+                            <button
+                              key={cIdx}
+                              onClick={() => handleSendMessage(chip.query)}
+                              className="px-2.5 py-1 rounded-lg bg-white border border-brand-200 hover:bg-brand-50 text-[11px] font-semibold text-brand-700 transition-colors shadow-2xs"
+                            >
+                              {chip.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
                       {/* Official Sources Citations */}
                       {msg.citations && msg.citations.length > 0 && (
-                        <div className="mt-4 pt-3 border-t border-slate-200/80 text-[11px]">
+                        <div className="mt-3 pt-3 border-t border-slate-200/80 text-[11px]">
                           <span className="font-bold text-slate-500 block mb-1.5">Official Verified Sources:</span>
                           <div className="flex flex-wrap gap-1.5">
                             {msg.citations.map((c, cIdx) => (
@@ -310,7 +425,7 @@ export default function AIAdvisorWorkspace({ student, user }) {
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask a follow-up question or request an application checklist..."
+              placeholder="Ask a follow-up question, clarify your choice, or request an application checklist..."
               className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-xs focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
             />
             <button
