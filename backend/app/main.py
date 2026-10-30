@@ -26,6 +26,7 @@ from app.agent.tools import (
     tool_generate_application_checklist
 )
 from app.api.endpoints import router as tracker_router
+from app.api.chat import router as chat_router
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -33,8 +34,9 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Include structured database routes
+# Include structured database & conversational assistant routes
 app.include_router(tracker_router)
+app.include_router(chat_router)
 
 # CORS Middleware configuration
 allowed_origins = [origin.strip() for origin in settings.ALLOWED_ORIGINS.split(",") if origin.strip()]
