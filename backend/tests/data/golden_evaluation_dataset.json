@@ -1,0 +1,83 @@
+[
+  {
+    "id": "eval-01",
+    "query": "What are the eligibility criteria and required documents for the Safaricom Industrial Attachment?",
+    "expected_opportunity_id": "opp-safaricom-attachment-2026",
+    "expected_category": "Internship",
+    "expected_keywords": ["Dean", "transcripts", "NHIF", "Second Class Upper", "attachment"],
+    "expected_official_url": "https://www.safaricom.co.ke/careers"
+  },
+  {
+    "id": "eval-02",
+    "query": "What documents do I need to apply for the Higher Education Financing HEF scholarship and HELB loan?",
+    "expected_opportunity_id": "opp-hef-undergraduate-2026",
+    "expected_category": "Scholarship",
+    "expected_keywords": ["KRA PIN", "KCSE", "KUCCPS", "Guarantors", "National ID"],
+    "expected_official_url": "https://www.hef.co.ke"
+  },
+  {
+    "id": "eval-03",
+    "query": "What is the age limit and minimum KCSE grade for the Mastercard Foundation scholarship at USIU Africa?",
+    "expected_opportunity_id": "opp-mastercard-fdn-usiu-2026",
+    "expected_category": "Scholarship",
+    "expected_keywords": ["29 years", "B (plain)", "refugees", "disabilities"],
+    "expected_official_url": "https://www.usiu.ac.ke/mastercard-foundation-scholars-program/"
+  },
+  {
+    "id": "eval-04",
+    "query": "Who is eligible for the Public Service Internship Programme PSIP Cohort in Kenya?",
+    "expected_opportunity_id": "opp-psc-psip-internship-2026",
+    "expected_category": "Internship",
+    "expected_keywords": ["Bachelor's degree", "unemployed", "PSC", "stipend"],
+    "expected_official_url": "https://www.publicservice.go.ke"
+  },
+  {
+    "id": "eval-05",
+    "query": "How many years of work experience do I need to apply for the Chevening scholarship in Kenya?",
+    "expected_opportunity_id": "opp-chevening-kenya-2027",
+    "expected_category": "Scholarship",
+    "expected_keywords": ["two years", "2,800 hours", "return to Kenya", "UK university"],
+    "expected_official_url": "https://www.chevening.org/scholarship/kenya/"
+  },
+  {
+    "id": "eval-06",
+    "query": "What degrees are accepted for the Presidential Digital Talent Programme PDTP Digika?",
+    "expected_opportunity_id": "opp-pdtp-digika-2026",
+    "expected_category": "Graduate Trainee",
+    "expected_keywords": ["ICT", "Engineering", "First Class", "Upper Second-Class", "certifications"],
+    "expected_official_url": "https://digitalent.go.ke"
+  },
+  {
+    "id": "eval-07",
+    "query": "Can continuing university students apply for attachment at Kenya Revenue Authority KRA?",
+    "expected_opportunity_id": "opp-kra-internship-2026",
+    "expected_category": "Internship",
+    "expected_keywords": ["3-month", "introductory letter", "Dean", "KRA PIN"],
+    "expected_official_url": "https://erecruitment.kra.go.ke"
+  },
+  {
+    "id": "eval-08",
+    "query": "What are the requirements for the DAAD In-Country In-Region scholarships in Kenya?",
+    "expected_opportunity_id": "opp-daad-region-kenya-2027",
+    "expected_category": "Scholarship",
+    "expected_keywords": ["Master's", "PhD", "6 years", "Upper Second-Class", "Europass"],
+    "expected_official_url": "https://www.daad.or.ke"
+  },
+  {
+    "id": "eval-09",
+    "query": "How do I qualify for the Equity Leaders Program pre-university paid internship?",
+    "expected_opportunity_id": "opp-equity-leaders-elp-2026",
+    "expected_category": "Scholarship",
+    "expected_keywords": ["Wings to Fly", "top boy", "top girl", "Equity Bank branch", "sub-county"],
+    "expected_official_url": "https://equitygroupfoundation.com"
+  },
+  {
+    "id": "eval-10",
+    "query": "Is there a scholarship or grant for Canadian high school hockey players?",
+    "expected_opportunity_id": null,
+    "expected_category": "Out_Of_Scope",
+    "expected_keywords": [],
+    "expected_official_url": null,
+    "is_out_of_domain": true
+  }
+]
