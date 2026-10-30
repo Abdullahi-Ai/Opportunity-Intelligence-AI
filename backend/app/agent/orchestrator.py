@@ -64,6 +64,23 @@ def get_conversational_greeting_response() -> str:
         "How can I assist you with your academic or career opportunities today?"
     )
 
+def extract_clean_content_body(raw_chunk_text: str) -> str:
+    """Extracts the actual informative body from a chunk, stripping all internal chunk headers."""
+    if "\n\n" in raw_chunk_text:
+        body = raw_chunk_text.split("\n\n", 1)[1]
+    else:
+        body = raw_chunk_text
+
+    clean_lines = [
+        line.strip() for line in body.split("\n")
+        if line.strip() and not line.strip().startswith("#") and not line.strip().startswith("---")
+        and not line.strip().startswith("Opportunity:") and not line.strip().startswith("Category:")
+        and not line.strip().startswith("Section:") and not line.strip().startswith("Official Link:")
+    ]
+    clean_text = " ".join(clean_lines)
+    clean_text = re.sub(r"\s+", " ", clean_text).strip()
+    return clean_text
+
 # In-memory session store for multi-turn short-term conversation context
 # Session ID -> list of {"role": str, "content": str, ...}
 SESSION_CONTEXT_CACHE: Dict[str, List[Dict[str, Any]]] = {}
@@ -249,16 +266,14 @@ class AgentOrchestrator:
                 }
             
             raw_text = r.get("content_excerpt", "").strip()
-            clean_lines = [
-                line.strip() for line in raw_text.split("\n")
-                if line.strip() and not line.strip().startswith("#") and not line.strip().startswith("---")
-            ]
-            clean_excerpt = " ".join(clean_lines[:3])
-            if len(clean_excerpt) > 240:
-                clean_excerpt = clean_excerpt[:240] + "..."
-            
-            sec_name = r.get("section") or "Overview"
-            opp_groups[title_key]["sections"].append((sec_name, clean_excerpt))
+            clean_body = extract_clean_content_body(raw_text)
+            if len(clean_body) > 300:
+                clean_body = clean_body[:300] + "..."
+            elif not clean_body:
+                clean_body = "Verified published requirements and guidelines are available via the official portal."
+
+            sec_name = r.get("section") or "Key Details"
+            opp_groups[title_key]["sections"].append((sec_name, clean_body))
 
             url = r.get("official_url")
             if url and not any(c["url"] == url for c in citations):
@@ -270,20 +285,33 @@ class AgentOrchestrator:
             url = opp["official_url"]
             provider = opp["provider"]
             deadline = opp["deadline"] or "Rolling / Unspecified"
-            
+
             highlights_md = "\n".join([f"  - **{sec}:** {txt}" for sec, txt in opp["sections"][:2]])
-            
+
             opp_cards.append(
                 f"#### [{title}]({url})\n"
                 f"- **Provider:** {provider} | **Deadline:** {deadline}\n"
                 f"- **Verified Details:**\n{highlights_md}"
             )
 
-        reply = (
-            "Here is what our verified Kenyan opportunity records indicate regarding your inquiry:\n\n"
-            + "\n\n".join(opp_cards) +
-            "\n\n> 🔍 *All details above are certified against official publisher portals.*"
-        )
+        clean_q = re.sub(r"[^\w\s]", "", user_message.strip().lower())
+        broad_terms = {"academic", "academics", "scholarship", "scholarships", "bursary", "bursaries", "funding", "education"}
+        if clean_q in broad_terms:
+            reply = (
+                f"### Verified Academic Opportunities & Scholarships in Kenya\n\n"
+                f"Here are the primary verified scholarship and educational funding programs matching your academic query:\n\n"
+                + "\n\n".join(opp_cards[:3]) +
+                f"\n\n---\n"
+                f"💡 **Next Steps:**\n"
+                f"- Tell me your current institution, course, and year of study to run an **instant eligibility assessment**.\n"
+                f"- Or ask: *\"What documents do I need for HEF?\"* or *\"How do I apply for Equity ELP?\"* for step-by-step checklists."
+            )
+        else:
+            reply = (
+                "Here is what our verified Kenyan opportunity records indicate regarding your inquiry:\n\n"
+                + "\n\n".join(opp_cards) +
+                "\n\n> 🔍 *All details above are certified against official publisher portals.*"
+            )
 
         return {
             "response": reply,
