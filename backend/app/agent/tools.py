@@ -39,6 +39,7 @@ def tool_search_opportunities(input_data: SearchOpportunitiesInput) -> Dict[str,
         "count": len(results),
         "results": [
             {
+                "opportunity_id": r["metadata"].get("opportunity_id"),
                 "title": r["metadata"].get("title"),
                 "provider": r["metadata"].get("provider"),
                 "category": r["metadata"].get("category"),

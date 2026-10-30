@@ -1,28 +1,28 @@
-"""Opportunity Intelligence AI - Controlled Agent Orchestrator.
-Orchestrates multi-turn conversations, intent understanding, persistent memory,
-ChromaDB RAG evidence retrieval, deterministic tools, and student-friendly response synthesis.
+"""Agent Orchestrator for Opportunity Intelligence AI.
+Implements the 17-step deterministic and RAG conversational turn pipeline.
+Integrates intent classification, persistent memory, entity extraction,
+rule-based date math, eligibility evaluation, and grounded evidence delivery.
 """
 
+import os
 import re
 import json
 import logging
-from typing import List, Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 from datetime import datetime
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.agent.prompts import AGENT_SYSTEM_PROMPT, build_student_context_prompt
-from app.agent.schemas import TOOLS_SPEC
-from app.agent.intent import IntentType, classify_intent, extract_entities, KNOWN_PROVIDERS
+from app.agent.intent import classify_intent, IntentType, extract_entities
 from app.agent.memory import (
     ConversationState,
     get_or_create_conversation,
     load_conversation_state,
     save_conversation_state,
     record_turn,
-    update_structured_summary,
-    load_message_history
+    update_structured_summary
 )
+from app.models.entities import Conversation
 from app.agent.tools import (
     SearchOpportunitiesInput,
     tool_search_opportunities,
@@ -37,7 +37,7 @@ from app.agent.tools import (
 logger = logging.getLogger(__name__)
 
 # Minimum semantic similarity threshold required to consider a RAG chunk relevant
-MIN_RAG_SIMILARITY_THRESHOLD = 0.40
+MIN_RAG_SIMILARITY_THRESHOLD = 0.15
 
 # In-memory session fallback cache for non-database test mocks
 SESSION_CONTEXT_CACHE: Dict[str, List[Dict[str, Any]]] = {}
@@ -140,8 +140,8 @@ class AgentOrchestrator:
             }
         else:
             question = (
-                f"I want to make sure I give you exact, verified information. "
-                f"Could you specify if you are looking to **discover opportunities**, **check your eligibility**, or **view application deadlines**?"
+                "I want to make sure I give you exact, verified information. "
+                "Could you specify if you are looking to **discover opportunities**, **check your eligibility**, or **view application deadlines**?"
             )
             state.pending_question = {
                 "question": "Clarify user request",
@@ -157,11 +157,229 @@ class AgentOrchestrator:
             "intent": IntentType.AMBIGUOUS_INCOMPLETE.value
         }
 
+    def _handle_opportunity_discovery(self, message: str, state: ConversationState) -> Dict[str, Any]:
+        """Provides high-level category orientation and displays curated verified opportunities."""
+        search_res = tool_search_opportunities(SearchOpportunitiesInput(
+            query="scholarships industrial attachments graduate trainee programmes Kenyan university students",
+            top_k=8
+        ))
+
+        raw_results = search_res.get("results", [])
+        seen_titles = set()
+        unique_opps = []
+        for r in raw_results:
+            title = r.get("title")
+            if title and title not in seen_titles:
+                seen_titles.add(title)
+                unique_opps.append(r)
+                if len(unique_opps) >= 4:
+                    break
+
+        # Fallback if search returned fewer than expected
+        if not unique_opps:
+            search_res = tool_search_opportunities(SearchOpportunitiesInput(query="Kenya university opportunities", top_k=4))
+            unique_opps = search_res.get("results", [])
+
+        # Save to discussed_opportunities memory
+        state.discussed_opportunities = [
+            {
+                "id": opp.get("opportunity_id"),
+                "title": opp.get("title"),
+                "provider": opp.get("provider"),
+                "deadline": opp.get("deadline"),
+                "official_url": opp.get("official_url"),
+                "category": opp.get("category")
+            }
+            for opp in unique_opps
+        ]
+
+        cards = []
+        citations = []
+        for i, opp in enumerate(unique_opps, 1):
+            title = opp.get("title", "Opportunity")
+            provider = opp.get("provider", "Verified Organization")
+            cat = opp.get("category", "General")
+            url = opp.get("official_url", "")
+            dl_str = opp.get("deadline")
+            cd = tool_calculate_deadline_countdown(DeadlineCountdownInput(deadline_date_str=dl_str))
+
+            excerpt = extract_clean_content_body(opp.get("content_excerpt", ""))
+            if len(excerpt) > 160:
+                excerpt = excerpt[:157] + "..."
+
+            if url and not any(c["url"] == url for c in citations):
+                citations.append({"title": title, "url": url})
+
+            status_label = cd.get("status_label", "Open / Active")
+            cards.append(
+                f"### {i}. [{title}]({url})\n"
+                f"- 🏢 **Organization:** {provider}\n"
+                f"- 📂 **Category:** {cat}\n"
+                f"- 📋 **Eligibility Summary:** {excerpt or 'Open to qualified Kenyan university students.'}\n"
+                f"- ⏰ **Official Deadline:** {dl_str or 'Continuous'} (`{status_label}`)\n"
+                f"- 🔗 **Official Portal:** [{title}]({url})"
+            )
+
+        reply = (
+            "Absolutely! I can help you discover opportunities available to Kenyan university students.\n\n"
+            "Here are some categories we can explore:\n"
+            "1. 🎓 **Scholarships and financial aid** (e.g. Higher Education Financing HEF, Equity ELP, Mastercard Foundation)\n"
+            "2. 🏢 **Industrial attachments and internships** (e.g. Safaricom Attachment, UN Gigiri, KRA)\n"
+            "3. 🚀 **Graduate trainee programmes** (e.g. KRA Graduate Trainee, Safaricom Discover)\n"
+            "4. 🌍 **International scholarships** (e.g. Chevening UK, DAAD In-Country)\n"
+            "5. 🔬 **Fellowships and research opportunities** (e.g. Mawazo Institute, Hult Prize Kenya)\n\n"
+            "Here are some opportunities currently recorded in our verified directory:\n\n"
+            + "\n\n".join(cards) +
+            "\n\n---\n"
+            "💡 **Next steps you can take:**\n"
+            "- Ask: *\"Tell me about Safaricom\"* to inspect details.\n"
+            "- Ask: *\"What are the requirements?\"* for the opportunity of your choice.\n"
+            "- Ask: *\"Am I eligible?\"* (mention your course and year of study).\n"
+            "- Ask: *\"Which one has the earliest deadline?\"* to plan your submissions."
+        )
+
+        return {
+            "response": reply,
+            "tool_calls": [{"tool": "search_opportunities", "query": "featured opportunities"}],
+            "citations": citations,
+            "grounded": True,
+            "intent": IntentType.OPPORTUNITY_DISCOVERY.value
+        }
+
+    def _handle_explain_requirements(self, message: str, intent_meta: Dict[str, Any], state: ConversationState) -> Dict[str, Any]:
+        """Explains verified requirements for the active or requested opportunity."""
+        target_id = intent_meta.get("entities", {}).get("opportunity_id")
+        opp_info = None
+
+        if target_id:
+            for o in state.discussed_opportunities:
+                if o.get("id") == target_id:
+                    opp_info = o
+                    break
+        elif state.discussed_opportunities:
+            opp_info = state.discussed_opportunities[0]
+            target_id = opp_info.get("id")
+
+        if not target_id:
+            search_res = tool_search_opportunities(SearchOpportunitiesInput(query=message, top_k=1))
+            if search_res.get("results"):
+                target_id = search_res["results"][0].get("opportunity_id")
+
+        if not target_id:
+            return {
+                "response": (
+                    "Which opportunity's requirements would you like me to explain? "
+                    "For example: *Safaricom attachment*, *Higher Education Financing (HEF)*, *KRA Graduate Trainee*, or *Chevening Scholarship*."
+                ),
+                "tool_calls": [],
+                "citations": [],
+                "grounded": True,
+                "intent": IntentType.EXPLAIN_REQUIREMENTS.value
+            }
+
+        search_res = tool_search_opportunities(SearchOpportunitiesInput(
+            query=f"eligibility requirements academic criteria {target_id}",
+            top_k=2
+        ))
+
+        opp_title = (opp_info.get("title") if opp_info else None) or target_id.replace("opp-", "").replace("-2026", "").replace("-", " ").title()
+        opp_url = opp_info.get("official_url", "") if opp_info else ""
+        citations = []
+        body_text = ""
+
+        if search_res.get("results"):
+            best = search_res["results"][0]
+            opp_title = best.get("title", opp_title)
+            opp_url = best.get("official_url", opp_url)
+            body_text = extract_clean_content_body(best.get("content_excerpt", ""))
+            if opp_url:
+                citations.append({"title": opp_title, "url": opp_url})
+
+        reply = (
+            f"### Verified Requirements: {opp_title}\n\n"
+            f"Based on certified published guidelines, here are the key criteria and qualifications required:\n\n"
+            f"{body_text}\n\n"
+            f"🔗 **Official Application Portal:** [{opp_title}]({opp_url})\n\n"
+            f"💡 **Suggested Next Step:** Ask *\"Am I eligible?\"* and provide your university, course, and year of study to assess your profile."
+        )
+
+        return {
+            "response": reply,
+            "tool_calls": [{"tool": "search_opportunities", "opportunity_id": target_id}],
+            "citations": citations,
+            "grounded": True,
+            "intent": IntentType.EXPLAIN_REQUIREMENTS.value
+        }
+
+    def _handle_followup_provider(self, message: str, intent_meta: Dict[str, Any], state: ConversationState) -> Dict[str, Any]:
+        """Provides verified details for a specific organization or opportunity."""
+        target_id = intent_meta.get("entities", {}).get("opportunity_id")
+        provider_kw = intent_meta.get("entities", {}).get("provider_keyword") or message
+
+        search_res = tool_search_opportunities(SearchOpportunitiesInput(
+            query=f"{provider_kw} Kenya university students requirements",
+            top_k=3
+        ))
+        tool_calls = [{"tool": "search_opportunities", "query": provider_kw}]
+        citations = []
+
+        if not search_res.get("results"):
+            return {
+                "response": f"I could not find verified directory records specifically for '{provider_kw}'. Would you like me to show all available scholarships or industrial attachments?",
+                "tool_calls": tool_calls,
+                "citations": citations,
+                "grounded": True,
+                "intent": IntentType.FOLLOW_UP_QUESTION.value
+            }
+
+        best = search_res["results"][0]
+        opp_title = best.get("title")
+        opp_url = best.get("official_url")
+        dl_str = best.get("deadline")
+        cat = best.get("category")
+        provider = best.get("provider")
+
+        cd = tool_calculate_deadline_countdown(DeadlineCountdownInput(deadline_date_str=dl_str))
+        excerpt = extract_clean_content_body(best.get("content_excerpt", ""))
+
+        if opp_url:
+            citations.append({"title": opp_title, "url": opp_url})
+
+        active_opp = {
+            "id": best.get("opportunity_id") or target_id,
+            "title": opp_title,
+            "provider": provider,
+            "deadline": dl_str,
+            "official_url": opp_url,
+            "category": cat
+        }
+        state.discussed_opportunities = [active_opp] + [o for o in state.discussed_opportunities if o.get("title") != opp_title]
+
+        reply = (
+            f"### {opp_title}\n\n"
+            f"- 🏢 **Organization:** {provider}\n"
+            f"- 📂 **Category:** {cat}\n"
+            f"- ⏰ **Official Deadline:** {dl_str or 'Continuous Intake'} (`{cd.get('status_label')}` — {cd.get('summary')})\n\n"
+            f"**Published Summary & Focus:**\n{excerpt}\n\n"
+            f"🔗 **Official Application Portal:** [{opp_title}]({opp_url})\n\n"
+            f"💡 **Suggested Next Steps:**\n"
+            f"- Ask: *\"What are the requirements?\"*\n"
+            f"- Ask: *\"Am I eligible?\"*\n"
+            f"- Ask: *\"Help me apply\"* to generate your application checklist."
+        )
+
+        return {
+            "response": reply,
+            "tool_calls": tool_calls,
+            "citations": citations,
+            "grounded": True,
+            "intent": IntentType.FOLLOW_UP_QUESTION.value
+        }
+
     def _handle_comparison_intent(self, message: str, state: ConversationState) -> Dict[str, Any]:
         """Compares opportunities currently discussed in conversation memory."""
         opps = state.discussed_opportunities
         if not opps:
-            # Fall back to searching top active opportunities
             search_res = tool_search_opportunities(SearchOpportunitiesInput(query="open scholarships and attachments Kenya", top_k=3))
             opps = [
                 {
@@ -183,7 +401,6 @@ class AgentOrchestrator:
                 "intent": IntentType.OPPORTUNITY_COMPARISON.value
             }
 
-        # Calculate and rank deadlines deterministically
         ranked_opps = []
         citations = []
         for opp in opps:
@@ -200,7 +417,6 @@ class AgentOrchestrator:
             if opp.get("official_url"):
                 citations.append({"title": opp.get("title"), "url": opp.get("official_url")})
 
-        # Sort: positive days_remaining first (ascending), then rolling (None), then expired
         def sort_key(item):
             d = item["days_remaining"]
             if d is None:
@@ -259,7 +475,6 @@ class AgentOrchestrator:
         if entities.get("degree_level"):
             state.student_memory["degree_level"] = entities["degree_level"]
 
-        # Clear pending question
         state.pending_question = None
 
         uni = state.student_memory.get("university", "your university")
@@ -272,11 +487,10 @@ class AgentOrchestrator:
         if course: details.append(f"Course: **{course}**")
 
         reply = (
-            f"✅ **Preferences Updated Successfully**\n\n"
-            f"I have recorded your background:\n"
-            + "\n".join([f"- {d}" for d in details]) +
-            f"\n\nI will tailor all subsequent opportunity matching, eligibility assessments, and checklists to this profile. "
-            f"What opportunities would you like me to evaluate for you now?"
+            f"Noted and saved to your profile! 📝\n"
+            f"- " + "\n- ".join(details) + "\n\n"
+            "I will use this context for future eligibility checks and opportunity recommendations. "
+            "What opportunities would you like to explore?"
         )
 
         return {
@@ -296,25 +510,21 @@ class AgentOrchestrator:
         session_id: Optional[str] = None,
         student_profile: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """
-        Executes a controlled, verified conversational turn following the 17-step pipeline:
-        1. Identifies and loads conversation state & memory.
-        2. Injects student profile.
-        3. Classifies intent & resolves pending questions.
-        4. Executes appropriate deterministic tools or RAG searches.
-        5. Formats natural, clean, student-friendly responses with citations.
-        6. Updates persistent state and rolling summary.
-        """
-        # Step 1 & 2: Load or create persistent conversation
+        """Executes a controlled, verified conversational turn following the 17-step pipeline."""
         conversation = None
         state = None
         if db:
-            conversation = get_or_create_conversation(db, conversation_id, user_id, session_id)
+            conversation = get_or_create_conversation(
+                db=db,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                anonymous_session_id=session_id
+            )
             state = load_conversation_state(db, conversation)
         else:
             state = ConversationState(conversation_id=conversation_id, user_id=user_id, anonymous_session_id=session_id)
 
-        # Merge durable student profile into memory if present
+        # Merge student profile into memory if present
         if student_profile:
             for k, v in student_profile.items():
                 if v and k not in state.student_memory:
@@ -351,7 +561,14 @@ class AgentOrchestrator:
         final_reply = ""
 
         # Step 4: Route Intent to Specific Handlers
-        if intent == IntentType.GREETING_SOCIAL:
+        if intent == IntentType.THANK_YOU:
+            final_reply = (
+                "You're very welcome! 😊 Feel free to ask anytime if you want to discover more verified opportunities, "
+                "check your eligibility, review deadlines, or generate application checklists. Best of luck with your academic journey!"
+            )
+            state.pending_question = None
+
+        elif intent == IntentType.GREETING_SOCIAL:
             final_reply = (
                 "Hello! 👋 I am your **Opportunity Intelligence AI** advisor for university students in Kenya.\n\n"
                 "I can help you:\n"
@@ -363,9 +580,27 @@ class AgentOrchestrator:
             )
             state.pending_question = None
 
+        elif intent == IntentType.OPPORTUNITY_DISCOVERY:
+            res = self._handle_opportunity_discovery(message, state)
+            final_reply = res["response"]
+            tool_calls_executed.extend(res["tool_calls"])
+            citations.extend(res["citations"])
+
         elif intent == IntentType.AMBIGUOUS_INCOMPLETE:
             res = self._handle_ambiguous_intent(message, intent_meta, state)
             final_reply = res["response"]
+
+        elif intent == IntentType.FOLLOW_UP_QUESTION:
+            res = self._handle_followup_provider(message, intent_meta, state)
+            final_reply = res["response"]
+            tool_calls_executed.extend(res["tool_calls"])
+            citations.extend(res["citations"])
+
+        elif intent == IntentType.EXPLAIN_REQUIREMENTS:
+            res = self._handle_explain_requirements(message, intent_meta, state)
+            final_reply = res["response"]
+            tool_calls_executed.extend(res["tool_calls"])
+            citations.extend(res["citations"])
 
         elif intent == IntentType.OPPORTUNITY_COMPARISON:
             res = self._handle_comparison_intent(message, state)
@@ -386,13 +621,11 @@ class AgentOrchestrator:
             state.pending_question = None
 
         elif intent == IntentType.CHECKLIST_GENERATION:
-            # Identify target opportunity
             target_id = intent_meta.get("entities", {}).get("opportunity_id")
             if not target_id and state.discussed_opportunities:
                 target_id = state.discussed_opportunities[0].get("id")
 
             if not target_id:
-                # Search for matching opportunity
                 opp_search = tool_search_opportunities(SearchOpportunitiesInput(query=message, top_k=1))
                 if opp_search.get("results"):
                     target_id = opp_search["results"][0].get("opportunity_id")
@@ -400,7 +633,7 @@ class AgentOrchestrator:
             if target_id:
                 chk_res = tool_generate_application_checklist(GenerateChecklistInput(opportunity_id=target_id))
                 tool_calls_executed.append({"tool": "generate_application_checklist", "opportunity_id": target_id})
-                opp_title = chk_res.get("opportunity_title", "Opportunity")
+                opp_title = chk_res.get("title") or chk_res.get("opportunity_title", "Opportunity")
                 opp_url = chk_res.get("official_url", "")
                 if opp_url:
                     citations.append({"title": opp_title, "url": opp_url})
@@ -420,15 +653,22 @@ class AgentOrchestrator:
 
         elif intent == IntentType.ELIGIBILITY_ASSESSMENT:
             target_id = intent_meta.get("entities", {}).get("opportunity_id")
-            if not target_id and state.discussed_opportunities:
-                target_id = state.discussed_opportunities[0].get("id")
+            opp_info = None
+
+            if target_id:
+                for o in state.discussed_opportunities:
+                    if o.get("id") == target_id:
+                        opp_info = o
+                        break
+            elif state.discussed_opportunities:
+                opp_info = state.discussed_opportunities[0]
+                target_id = opp_info.get("id")
 
             if not target_id:
                 search_res = tool_search_opportunities(SearchOpportunitiesInput(query=message, top_k=1))
                 if search_res.get("results"):
                     target_id = search_res["results"][0].get("opportunity_id")
 
-            # Check if student params are available
             mem = state.student_memory
             deg = mem.get("degree_level", "Undergraduate")
             field = mem.get("field_of_study", "Computer Science")
@@ -442,7 +682,7 @@ class AgentOrchestrator:
                     student_year_of_study=int(yr)
                 ))
                 tool_calls_executed.append({"tool": "assess_eligibility", "opportunity_id": target_id})
-                opp_title = eval_res.get("opportunity_title", "Opportunity")
+                opp_title = eval_res.get("title") or eval_res.get("opportunity_title", "Opportunity")
                 opp_url = eval_res.get("official_url", "")
                 if opp_url:
                     citations.append({"title": opp_title, "url": opp_url})
@@ -470,43 +710,74 @@ class AgentOrchestrator:
 
         elif intent == IntentType.DEADLINE_INQUIRY:
             target_id = intent_meta.get("entities", {}).get("opportunity_id")
-            if not target_id and state.discussed_opportunities:
-                target_id = state.discussed_opportunities[0].get("id")
+            opp_info = None
 
-            search_res = tool_search_opportunities(SearchOpportunitiesInput(query=message, top_k=1))
-            tool_calls_executed.append({"tool": "search_opportunities", "query": message})
-            if search_res.get("results"):
-                best = search_res["results"][0]
-                opp_title = best.get("title")
-                dl_str = best.get("deadline")
-                url = best.get("official_url")
-                if url:
-                    citations.append({"title": opp_title, "url": url})
+            if target_id:
+                for o in state.discussed_opportunities:
+                    if o.get("id") == target_id:
+                        opp_info = o
+                        break
+            elif state.discussed_opportunities:
+                opp_info = state.discussed_opportunities[0]
+
+            if opp_info and opp_info.get("deadline"):
+                opp_title = opp_info.get("title")
+                dl_str = opp_info.get("deadline")
+                url = opp_info.get("official_url")
+                provider = opp_info.get("provider")
 
                 cd = tool_calculate_deadline_countdown(DeadlineCountdownInput(deadline_date_str=dl_str))
                 tool_calls_executed.append({"tool": "calculate_deadline_countdown", "deadline": dl_str})
+                if url:
+                    citations.append({"title": opp_title, "url": url})
 
                 final_reply = (
                     f"### Application Deadline: {opp_title}\n\n"
-                    f"- **Provider:** {best.get('provider')}\n"
-                    f"- **Published Closing Date:** {dl_str or 'Not confirmed / Continuous'}\n"
+                    f"- **Provider:** {provider}\n"
+                    f"- **Published Closing Date:** **{dl_str}**\n"
                     f"- **Authoritative Status:** **{cd.get('status_label')}**\n\n"
                     f"{cd.get('summary')}\n\n"
                     f"🔗 **Verify on Official Portal:** [{opp_title}]({url})"
                 )
                 state.pending_question = None
             else:
-                final_reply = "I could not find verified records for that deadline. Please check the official provider portal directly to avoid missing dates."
+                search_res = tool_search_opportunities(SearchOpportunitiesInput(query=message, top_k=1))
+                tool_calls_executed.append({"tool": "search_opportunities", "query": message})
+                if search_res.get("results"):
+                    best = search_res["results"][0]
+                    opp_title = best.get("title")
+                    dl_str = best.get("deadline")
+                    url = best.get("official_url")
+                    if url:
+                        citations.append({"title": opp_title, "url": url})
+
+                    cd = tool_calculate_deadline_countdown(DeadlineCountdownInput(deadline_date_str=dl_str))
+                    tool_calls_executed.append({"tool": "calculate_deadline_countdown", "deadline": dl_str})
+
+                    final_reply = (
+                        f"### Application Deadline: {opp_title}\n\n"
+                        f"- **Provider:** {best.get('provider')}\n"
+                        f"- **Published Closing Date:** {dl_str or 'Not confirmed / Continuous'}\n"
+                        f"- **Authoritative Status:** **{cd.get('status_label')}**\n\n"
+                        f"{cd.get('summary')}\n\n"
+                        f"🔗 **Verify on Official Portal:** [{opp_title}]({url})"
+                    )
+                    state.pending_question = None
+                else:
+                    final_reply = "I could not find verified records for that deadline. Please check the official provider portal directly to avoid missing dates."
 
         else:
-            # General Discovery, Scholarship Search, Internship Search, Guidance
+            # Scholarship Search, Internship Search, Graduate Trainee, Field Search
             category_filter = None
             if intent == IntentType.SCHOLARSHIP_SEARCH:
                 category_filter = "Scholarship"
             elif intent == IntentType.INTERNSHIP_SEARCH:
                 category_filter = "Internship"
+            elif intent == IntentType.GRADUATE_PROGRAMME_SEARCH:
+                category_filter = "Graduate Trainee"
+            elif intent == IntentType.FELLOWSHIP_SEARCH:
+                category_filter = "Fellowship"
 
-            # Check if student memory has relevant keywords
             enriched_query = message
             mem = state.student_memory
             if mem.get("field_of_study") and mem["field_of_study"] not in enriched_query:
@@ -522,6 +793,11 @@ class AgentOrchestrator:
             raw_results = search_res.get("results", [])
             valid_results = [r for r in raw_results if r.get("similarity_score", 0.0) >= MIN_RAG_SIMILARITY_THRESHOLD]
 
+            # If category filter yielded 0 results, retry without category constraint
+            if not valid_results and category_filter:
+                retry_res = tool_search_opportunities(SearchOpportunitiesInput(query=enriched_query, top_k=4))
+                valid_results = [r for r in retry_res.get("results", []) if r.get("similarity_score", 0.0) >= MIN_RAG_SIMILARITY_THRESHOLD]
+
             if not valid_results:
                 final_reply = (
                     f"I could not find verified Kenyan records matching your specific question ('{message}') in our official directory.\n\n"
@@ -534,7 +810,6 @@ class AgentOrchestrator:
                 )
                 state.pending_question = None
             else:
-                # Group and deduplicate by opportunity title
                 opp_groups: Dict[str, Dict[str, Any]] = {}
                 state.discussed_opportunities = []
 
@@ -550,7 +825,6 @@ class AgentOrchestrator:
                             "official_url": r.get("official_url"),
                             "sections": []
                         }
-                        # Add to discussed opportunities memory
                         state.discussed_opportunities.append({
                             "id": r.get("opportunity_id"),
                             "title": r.get("title"),
@@ -579,7 +853,6 @@ class AgentOrchestrator:
                     provider = opp["provider"]
                     deadline = opp["deadline"] or "Rolling / Unspecified"
 
-                    # Compute countdown status label
                     cd = tool_calculate_deadline_countdown(DeadlineCountdownInput(deadline_date_str=deadline))
                     badge = cd.get("status_label") or "Active"
 
@@ -596,7 +869,6 @@ class AgentOrchestrator:
                     + "\n\n".join(opp_cards) +
                     "\n\n> 🔍 *All details above are certified against official publisher portals.*"
                 )
-                # Offer helpful follow-up
                 state.pending_question = {
                     "question": "Would you like me to check your eligibility or generate an application checklist for any of these?",
                     "topic": "confirm_next_step",
@@ -621,7 +893,6 @@ class AgentOrchestrator:
                 citations=citations,
                 tool_calls=tool_calls_executed
             )
-            # Update auto-title if first turn
             if state.turn_count == 1:
                 clean_title = message.strip()[:40]
                 if len(message.strip()) > 40:

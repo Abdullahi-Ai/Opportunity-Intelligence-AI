@@ -26,7 +26,7 @@ def test_classify_clear_discovery_queries():
     clear_examples = [
         ("Find computer science scholarships for undergraduate students in Kenya", IntentType.SCHOLARSHIP_SEARCH),
         ("Show me tech internships in Nairobi for software engineers", IntentType.INTERNSHIP_SEARCH),
-        ("Look for graduate trainee programs in Kenya", IntentType.OPPORTUNITY_DISCOVERY),
+        ("Look for graduate trainee programs in Kenya", IntentType.GRADUATE_PROGRAMME_SEARCH),
     ]
     for text, expected_intent in clear_examples:
         intent, _ = classify_intent(text)

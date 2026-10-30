@@ -1,5 +1,5 @@
 """Intent Classification and Conversational Context Resolution Module.
-Implements 15 distinct intent categories with deterministic rule priority,
+Implements distinct intent categories with deterministic rule priority,
 contextual entity extraction, and pending-question resolution.
 """
 
@@ -9,10 +9,15 @@ from typing import Dict, Any, List, Optional, Tuple
 
 class IntentType(str, Enum):
     GREETING_SOCIAL = "greeting_social"
+    THANK_YOU = "thank_you"
     AMBIGUOUS_INCOMPLETE = "ambiguous_incomplete"
     OPPORTUNITY_DISCOVERY = "opportunity_discovery"
     SCHOLARSHIP_SEARCH = "scholarship_search"
     INTERNSHIP_SEARCH = "internship_search"
+    GRADUATE_PROGRAMME_SEARCH = "graduate_programme_search"
+    FELLOWSHIP_SEARCH = "fellowship_search"
+    FIELD_SEARCH = "field_search"
+    EXPLAIN_REQUIREMENTS = "explain_requirements"
     ELIGIBILITY_ASSESSMENT = "eligibility_assessment"
     DEADLINE_INQUIRY = "deadline_inquiry"
     OPPORTUNITY_COMPARISON = "opportunity_comparison"
@@ -117,7 +122,8 @@ def extract_entities(text: str) -> Dict[str, Any]:
         (r'\b(engineering|electrical engineering|civil engineering|mechanical engineering)\b', 'Engineering'),
         (r'\b(business|commerce|economics|finance|accounting)\b', 'Business & Economics'),
         (r'\b(law|llb)\b', 'Law'),
-        (r'\b(medicine|nursing|pharmacy|health)\b', 'Health Sciences')
+        (r'\b(medicine|nursing|pharmacy|health)\b', 'Health Sciences'),
+        (r'\b(agriculture|agribusiness)\b', 'Agriculture')
     ]
     for pattern, field in field_patterns:
         if re.search(pattern, clean):
@@ -130,14 +136,7 @@ def resolve_contextual_reply(
     message: str,
     pending_question: Optional[Dict[str, Any]]
 ) -> Tuple[Optional[IntentType], Optional[Dict[str, Any]]]:
-    """
-    Checks if student is answering an explicit question previously asked by assistant.
-    Examples:
-    - Assistant asked Kenya or abroad? -> Student says 'Both' or 'Kenya'
-    - Assistant asked for application checklist? -> Student says 'Yes'
-    - Assistant asked for university? -> Student says 'University of Nairobi'
-    - Assistant asked for year of study? -> Student says '3rd year'
-    """
+    """Checks if student is answering an explicit question previously asked by assistant."""
     if not pending_question:
         return None, None
 
@@ -160,35 +159,41 @@ def resolve_contextual_reply(
             intent = IntentType.SCHOLARSHIP_SEARCH if target_category == "scholarship" else IntentType.OPPORTUNITY_DISCOVERY
             return intent, resolved_context
 
-    # 3. Opportunity Category Choice ("Scholarships", "Internships", "Both")
-    if clean in ["scholarship", "scholarships", "internship", "internships", "attachments", "attachment", "both"]:
-        if q_topic == "clarify_category":
-            if "scholarship" in clean:
-                return IntentType.SCHOLARSHIP_SEARCH, q_context
-            elif "internship" in clean or "attachment" in clean:
-                return IntentType.INTERNSHIP_SEARCH, q_context
-            else:
-                return IntentType.OPPORTUNITY_DISCOVERY, q_context
-
-    # 4. Clarify academic choice ("scholarships", "degree", "research", "requirements")
-    if q_topic == "clarify_academic":
-        if "scholarship" in clean or "aid" in clean or "loan" in clean or "hef" in clean:
+    # 3. Opportunity Category Selection
+    category_map = {
+        "1": "scholarship",
+        "scholarships": "scholarship",
+        "scholarship": "scholarship",
+        "2": "internship",
+        "internships": "internship",
+        "internship": "internship",
+        "attachment": "internship",
+        "attachments": "internship",
+        "3": "graduate_trainee",
+        "graduate": "graduate_trainee",
+        "jobs": "graduate_trainee",
+        "4": "fellowship",
+        "fellowships": "fellowship",
+        "research": "fellowship"
+    }
+    if q_topic == "clarify_category" and clean in category_map:
+        cat = category_map[clean]
+        if cat == "scholarship":
             return IntentType.SCHOLARSHIP_SEARCH, q_context
-        if "intern" in clean or "attach" in clean:
+        elif cat == "internship":
             return IntentType.INTERNSHIP_SEARCH, q_context
-        if "research" in clean or "fellow" in clean:
-            return IntentType.OPPORTUNITY_DISCOVERY, {**q_context, "category": "Fellowship"}
-        if "requirement" in clean or "criteria" in clean:
-            return IntentType.GENERAL_GUIDANCE, q_context
+        elif cat == "graduate_trainee":
+            return IntentType.GRADUATE_PROGRAMME_SEARCH, q_context
+        elif cat == "fellowship":
+            return IntentType.FELLOWSHIP_SEARCH, q_context
 
-    # 5. University answering
+    # 4. University answering
     if q_topic == "ask_university":
         extracted = extract_entities(message)
-        if extracted.get("university") or len(clean.split()) <= 4:
-            uni_name = extracted.get("university") or message.strip()
-            return IntentType.PREFERENCE_UPDATE, {"university": uni_name, "next_action": q_context.get("next_action")}
+        if extracted.get("university"):
+            return IntentType.PREFERENCE_UPDATE, {"university": extracted["university"], "next_action": q_context.get("next_action")}
 
-    # 6. Year of study answering
+    # 5. Year of study answering
     if q_topic == "ask_year":
         extracted = extract_entities(message)
         if extracted.get("year_of_study"):
@@ -201,8 +206,8 @@ def classify_intent(
     pending_question: Optional[Dict[str, Any]] = None,
     recently_discussed: Optional[List[Dict[str, Any]]] = None
 ) -> Tuple[IntentType, Dict[str, Any]]:
-    """
-    Classifies user message into one of 15 intent categories.
+    """Classifies user message into one of the specialized intent categories.
+
     Returns: (IntentType, metadata_dict)
     """
     clean = message.strip().lower()
@@ -231,32 +236,55 @@ def classify_intent(
         if re.search(pattern, clean):
             return IntentType.OUT_OF_SCOPE, {"entities": entities}
 
-    # Step 3: Greeting and Social Pleasantries
+    # Step 3: Gratitude / Thank You
+    thank_you_phrases = ["thank you", "thanks", "asante", "shukran", "appreciated", "appreciate it", "many thanks", "thank you so much", "thx"]
+    if clean in thank_you_phrases or any(clean.startswith(p) for p in ["thank you", "thanks", "asante"]):
+        return IntentType.THANK_YOU, {"entities": entities}
+
+    # Step 4: Greeting and Social Pleasantries
     greetings = {"hello", "hi", "hey", "habari", "sasa", "jambo", "howdy", "sup", "yo", "morning", "good morning", "good evening", "good afternoon"}
     conversational_phrases = ["who are you", "what are you", "what can you do", "introduce yourself", "tell me about yourself", "how does this work", "how do you work"]
     if clean in greetings or any(phrase in clean for phrase in conversational_phrases) or (len(tokens) <= 2 and any(t in greetings for t in tokens)):
         return IntentType.GREETING_SOCIAL, {"entities": entities}
 
-    # Step 4: Ambiguous & Incomplete Requests (Single words or vague keywords)
-    # When a student types single words like "academic", "scholarship", "opportunities", "internship", "help"
-    ambiguous_keywords = {"academic", "academics", "scholarship", "scholarships", "bursary", "bursaries", "internship", "internships", "attachment", "attachments", "opportunities", "opportunity", "help", "apply", "info"}
+    # Step 5: Broad Opportunity Discovery (e.g. 'I need some of the opportunity', 'Show me opportunities')
+    discovery_patterns = [
+        r'\bi need some (of the )?opportunit(y|ies)\b',
+        r'\bi need opportunit(y|ies)\b',
+        r'\bshow me (some )?opportunit(y|ies)\b',
+        r'\bwhat opportunit(y|ies)\b',
+        r'\bexplore opportunit(y|ies)\b',
+        r'\blist (some )?opportunit(y|ies)\b',
+        r'\bfind (some )?opportunit(y|ies)\b',
+        r'\bavailable opportunit(y|ies)\b',
+        r'\bany opportunit(y|ies)\b',
+        r'\bshow me more\b',
+        r'\bopportunities for me\b',
+        r'\bgive me opportunit(y|ies)\b'
+    ]
+    if any(re.search(p, clean) for p in discovery_patterns):
+        return IntentType.OPPORTUNITY_DISCOVERY, {"entities": entities}
+
+    # Step 6: Ambiguous & Incomplete Requests (Single vague words like 'academic', 'scholarships')
+    ambiguous_keywords = {
+        "academic", "academics", "scholarship", "scholarships", "bursary", "bursaries",
+        "internship", "internships", "attachment", "attachments", "opportunities", "opportunity",
+        "help", "apply", "info", "funding"
+    }
     if clean in ambiguous_keywords or (len(tokens) == 1 and clean in ambiguous_keywords):
         return IntentType.AMBIGUOUS_INCOMPLETE, {
             "ambiguous_term": clean,
             "entities": entities
         }
 
-    # If message is 1-2 words and has no action verb or question structure
-    if len(tokens) <= 2 and not any(t in ["find", "search", "check", "how", "what", "when", "can", "am", "which", "compare"] for t in tokens):
+    if len(tokens) <= 2 and not any(t in ["find", "search", "check", "how", "what", "when", "can", "am", "which", "compare", "need", "show"] for t in tokens):
         if "academic" in clean:
             return IntentType.AMBIGUOUS_INCOMPLETE, {"ambiguous_term": "academic", "entities": entities}
-        if "scholarship" in clean:
-            return IntentType.AMBIGUOUS_INCOMPLETE, {"ambiguous_term": "scholarship", "entities": entities}
-        if "internship" in clean or "attachment" in clean:
-            return IntentType.AMBIGUOUS_INCOMPLETE, {"ambiguous_term": "internship", "entities": entities}
 
-    # Step 5: Opportunity Comparison & Superlative Queries ("Which one has earliest deadline?", "Which closes first?")
+    # Step 7: Opportunity Comparison & Superlative Queries ("Which one is best for me?", "Which one has earliest deadline?")
     comparison_patterns = [
+        r'\bwhich one is best\b',
+        r'\bwhich (one )?is best for me\b',
         r'\bwhich one\b',
         r'\bwhich (closes|deadline|has the earliest|is first|is earliest)\b',
         r'\bearliest deadline\b',
@@ -266,36 +294,55 @@ def classify_intent(
     for pattern in comparison_patterns:
         if re.search(pattern, clean):
             return IntentType.OPPORTUNITY_COMPARISON, {
-                "comparison_type": "earliest_deadline" if "earliest" in clean or "first" in clean or "close" in clean else "general",
+                "comparison_type": "earliest_deadline" if "earliest" in clean or "first" in clean or "close" in clean else "best_fit",
                 "entities": entities
             }
 
-    # Step 6: Follow-up Question about previously discussed opportunity
-    followup_patterns = [
-        r'\btell me (more|about that|about the first|about the second|about it)\b',
-        r'\bwhat about (that|the other|the first|the second|it)\b',
-        r'\bwhat does it (offer|require|pay)\b',
-        r'\bcan you explain that\b'
+    # Step 8: Graduate Trainee & Job Inquiries (Matched before general eligibility)
+    job_patterns = [
+        r'\bwhat jobs can i apply for\b',
+        r'\bjobs can i apply\b',
+        r'\bgraduate trainee\b',
+        r'\bgraduate trainee programme\b',
+        r'\bgraduate programme\b',
+        r'\bjobs for fresh graduates\b',
+        r'\bentry level jobs\b'
     ]
-    for pattern in followup_patterns:
+    for pattern in job_patterns:
         if re.search(pattern, clean):
-            return IntentType.FOLLOW_UP_QUESTION, {"entities": entities}
+            return IntentType.GRADUATE_PROGRAMME_SEARCH, {"entities": entities}
 
-    # Step 7: Application Checklist Generation
+    # Step 9: Application Checklist & Help Applying
     checklist_patterns = [
+        r'\bhelp me apply\b',
         r'\bchecklist\b',
         r'\brequired documents\b',
         r'\bwhat documents\b',
         r'\bdocuments do i need\b',
         r'\bdocuments required\b',
         r'\bhow to apply\b',
-        r'\bapplication steps\b'
+        r'\bapplication steps\b',
+        r'\bapplication checklist\b'
     ]
     for pattern in checklist_patterns:
         if re.search(pattern, clean):
             return IntentType.CHECKLIST_GENERATION, {"entities": entities}
 
-    # Step 8: Eligibility Assessment
+    # Step 10: Explain Requirements of Opportunity
+    requirement_patterns = [
+        r'\bwhat are the requirements\b',
+        r'\bwhat are the published requirements\b',
+        r'\brequirements of (this|the|safaricom|hef|kra|chevening|equity)\b',
+        r'\bwhat is required\b',
+        r'\bwhat do i need to qualify\b',
+        r'\bqualification requirements\b',
+        r'\bwhat are the qualifications\b'
+    ]
+    for pattern in requirement_patterns:
+        if re.search(pattern, clean):
+            return IntentType.EXPLAIN_REQUIREMENTS, {"entities": entities}
+
+    # Step 11: Eligibility Assessment
     eligibility_patterns = [
         r'\b(eligible|eligibility|qualify|qualification|can i apply|am i eligible|am i qualified)\b',
         r'\bcheck my (eligibility|chances|qualifications)\b',
@@ -305,12 +352,13 @@ def classify_intent(
         if re.search(pattern, clean):
             return IntentType.ELIGIBILITY_ASSESSMENT, {"entities": entities}
 
-    # Step 9: Deadline Inquiry
+    # Step 12: Deadline Inquiry
     deadline_patterns = [
         r'\bdeadline\b',
         r'\bclosing date\b',
         r'\bwhen does it close\b',
         r'\bwhen is the deadline\b',
+        r'\bwhat is the deadline\b',
         r'\bhow many days (left|remaining)\b',
         r'\bis it still open\b'
     ]
@@ -318,29 +366,24 @@ def classify_intent(
         if re.search(pattern, clean):
             return IntentType.DEADLINE_INQUIRY, {"entities": entities}
 
-    # Step 10: Application Planning
-    planning_patterns = [
-        r'\bhow should i prepare\b',
-        r'\bapplication plan\b',
-        r'\bprepare my application\b',
-        r'\btimeline to apply\b'
+    # Step 13: Follow-up Question or Specific Provider Lookup
+    followup_patterns = [
+        r'\bwhat about\s+([a-zA-Z\s]+)\b',
+        r'\btell me about\s+([a-zA-Z\s]+)\b',
+        r'\bhow about\s+([a-zA-Z\s]+)\b',
+        r'\btell me (more|about that|about the first|about the second|about it)\b',
+        r'\bwhat about (that|the other|the first|the second|it)\b',
+        r'\bcan you explain that\b'
     ]
-    for pattern in planning_patterns:
+    for pattern in followup_patterns:
         if re.search(pattern, clean):
-            return IntentType.APPLICATION_PLANNING, {"entities": entities}
+            return IntentType.FOLLOW_UP_QUESTION, {"entities": entities}
 
-    # Step 11: Application Tracking Progress
-    tracking_patterns = [
-        r'\bmy applications\b',
-        r'\btracked applications\b',
-        r'\bstatus of my\b',
-        r'\bwhat have i saved\b'
-    ]
-    for pattern in tracking_patterns:
-        if re.search(pattern, clean):
-            return IntentType.TRACKING_PROGRESS, {"entities": entities}
+    # Step 14: Search by Field of Study
+    if entities.get("field_of_study") and any(w in clean for w in ["anything for", "for students", "opportunities for", "for computer science", "for engineering"]):
+        return IntentType.FIELD_SEARCH, {"entities": entities}
 
-    # Step 12: Student Preference Update
+    # Step 15: Student Preference Update
     pref_patterns = [
         r'\bi am in (my )?(1st|2nd|3rd|4th|first|second|third|fourth) year\b',
         r'\bi study\b',
@@ -352,15 +395,30 @@ def classify_intent(
         if re.search(pattern, clean):
             return IntentType.PREFERENCE_UPDATE, {"entities": entities}
 
-    # Step 13: Internship & Attachment Search
+    # Step 16: Internship & Attachment Search
     if re.search(r'\b(attachment|internship|internships|industrial attachment|practicum)\b', clean):
         return IntentType.INTERNSHIP_SEARCH, {"entities": entities}
 
-    # Step 14: Scholarship Search
-    if re.search(r'\b(scholarship|scholarships|bursary|bursaries|tuition grant|fellowship|financial aid)\b', clean):
+    # Step 17: Scholarship Search
+    if re.search(r'\b(scholarship|scholarships|bursary|bursaries|tuition grant|financial aid|hef|helb)\b', clean):
         return IntentType.SCHOLARSHIP_SEARCH, {"entities": entities}
 
-    # Step 15: General Educational / Career Guidance
+    # Step 18: Fellowships & Research Competitions
+    if re.search(r'\b(fellowship|fellowships|research grant|competition|hult prize|mawazo)\b', clean):
+        return IntentType.FELLOWSHIP_SEARCH, {"entities": entities}
+
+    # Step 19: Application Planning
+    planning_patterns = [
+        r'\bhow should i prepare\b',
+        r'\bapplication plan\b',
+        r'\bprepare my application\b',
+        r'\btimeline to apply\b'
+    ]
+    for pattern in planning_patterns:
+        if re.search(pattern, clean):
+            return IntentType.APPLICATION_PLANNING, {"entities": entities}
+
+    # Step 20: General Educational / Career Guidance
     guidance_patterns = [
         r'\bwhat is (an )?attachment\b',
         r'\bhow does (hef|helb|kuccps) work\b',
