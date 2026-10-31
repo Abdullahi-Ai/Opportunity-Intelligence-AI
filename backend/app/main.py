@@ -44,7 +44,8 @@ app.include_router(chat_router)
 allowed_origins = [origin.strip() for origin in settings.ALLOWED_ORIGINS.split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins if allowed_origins else ["*"],
+    allow_origins=allowed_origins if allowed_origins else ["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origin_regex=r"https://.*\.vercel\.app" if settings.APP_ENV in ["production", "prod", "staging"] else None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

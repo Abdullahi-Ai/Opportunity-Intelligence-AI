@@ -33,7 +33,19 @@ def backup_chroma_db(destination_dir: Optional[str] = None) -> str:
     logger.info(f"ChromaDB backup created successfully at: {dest_path}")
     return str(dest_path)
 
-def reindex_all_opportunities(force_clear: bool = False) -> Dict[str, Any]:
+def reindex_all_opportunities(force_clear: bool = False, skip_if_populated: bool = True) -> Dict[str, Any]:
+    stats = vector_store.get_stats()
+    if skip_if_populated and not force_clear and stats.get("total_chunks", 0) > 0:
+        return {
+            "status": "skipped",
+            "message": "Vector store already populated with persistent records",
+            "chunks_indexed": 0,
+            "total_chunks_in_store": stats["total_chunks"],
+            "collection_name": stats["collection_name"],
+            "persist_directory": stats["persist_directory"],
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
     raw_dir = Path(settings.RAW_DATA_DIRECTORY)
     if not raw_dir.exists():
         raise FileNotFoundError(f"Raw opportunities directory not found: {raw_dir}")
@@ -49,18 +61,18 @@ def reindex_all_opportunities(force_clear: bool = False) -> Dict[str, Any]:
         vector_store.clear()
 
     total_upserted = vector_store.upsert_chunks(chunks)
-    stats = vector_store.get_stats()
+    new_stats = vector_store.get_stats()
 
     return {
         "status": "success",
         "chunks_indexed": total_upserted,
-        "total_chunks_in_store": stats["total_chunks"],
+        "total_chunks_in_store": new_stats["total_chunks"],
         "embedding_dimensions": expected_dim,
-        "collection_name": stats["collection_name"],
-        "persist_directory": stats["persist_directory"],
+        "collection_name": new_stats["collection_name"],
+        "persist_directory": new_stats["persist_directory"],
         "timestamp": datetime.utcnow().isoformat()
     }
 
 if __name__ == "__main__":
-    result = reindex_all_opportunities(force_clear=True)
+    result = reindex_all_opportunities(force_clear=False, skip_if_populated=True)
     print(result)
