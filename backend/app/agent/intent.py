@@ -291,6 +291,24 @@ def classify_intent(
         if "academic" in clean:
             return IntentType.AMBIGUOUS_INCOMPLETE, {"ambiguous_term": "academic", "entities": entities}
 
+    tracking_patterns = [
+        r'\bwhat applications am i (currently )?tracking\b',
+        r'\bmy (tracked )?applications\b',
+        r'\bwhich (application )?deadline is approaching\b',
+        r'\bwhich deadline is approaching (in my|for my)\b',
+        r'\bdeadline.*(in my|planner|tracker)\b',
+        r'\bwhat tasks have i not completed\b',
+        r'\bwhat should i work on next\b',
+        r'\b(incomplete|pending|unfinished) tasks\b',
+        r'\bmy application progress\b',
+        r'\bshow my tracker\b',
+        r'\bview my saved applications\b',
+        r'\bapplications i am tracking\b'
+    ]
+    for pattern in tracking_patterns:
+        if re.search(pattern, clean):
+            return IntentType.TRACKING_PROGRESS, {"entities": entities}
+
     comparison_patterns = [
         r'\bwhich one is best\b',
         r'\bwhich (one )?is best for me\b',

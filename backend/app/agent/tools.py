@@ -335,6 +335,12 @@ def tool_get_tracked_applications(
     results = []
     for app in tracked:
         opp = app.opportunity
+        dl_str = opp.application_deadline if opp else None
+        cd_res = tool_calculate_deadline_countdown(DeadlineCountdownInput(deadline_date_str=dl_str))
+
+        pending_tasks = [c.task_description for c in (app.checklists or []) if not c.is_completed]
+        completed_tasks = [c.task_description for c in (app.checklists or []) if c.is_completed]
+
         results.append({
             "application_id": app.id,
             "opportunity_id": opp.id if opp else app.opportunity_id,
@@ -342,9 +348,14 @@ def tool_get_tracked_applications(
             "provider": opp.provider if opp else "Unknown",
             "stage": app.stage,
             "official_url": opp.official_url if opp else None,
-            "deadline": opp.application_deadline if opp else None,
+            "deadline": dl_str,
+            "days_remaining": cd_res.get("days_remaining"),
+            "deadline_status": cd_res.get("status_label"),
             "tasks_count": len(app.checklists) if app.checklists else 0,
-            "completed_tasks": sum(1 for t in (app.checklists or []) if t.is_completed)
+            "completed_tasks": len(completed_tasks),
+            "pending_tasks": pending_tasks,
+            "notes": app.notes,
+            "target_submission_date": str(app.target_submission_date) if app.target_submission_date else None
         })
 
     return {

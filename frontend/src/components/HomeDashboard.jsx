@@ -1,295 +1,336 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
+  Compass, 
   Sparkles, 
-  Clock, 
-  ExternalLink, 
+  Bot, 
+  BookmarkCheck, 
+  Calendar, 
+  CheckCircle2, 
   ArrowRight, 
   ShieldCheck, 
+  Clock, 
   Award, 
-  Building2, 
-  Briefcase, 
-  GraduationCap, 
-  Calendar,
-  CheckCircle2
+  ChevronRight,
+  TrendingUp,
+  FileCheck2,
+  AlertCircle
 } from 'lucide-react';
+import { api, getToken } from '../api/client';
 
 export default function HomeDashboard({ 
-  opportunities, 
+  opportunities = [], 
   onSelectOpportunity, 
   onCheckEligibility, 
-  onNavigateToExplore,
-  onNavigateToAI 
+  onNavigateToExplore, 
+  onNavigateToAI,
+  onNavigateToMatches,
+  onNavigateToPlanner
 }) {
-  const upcomingClosingOpp = opportunities.find(
-    (o) => o.days_remaining !== null && o.days_remaining >= 0
-  ) || opportunities[0];
+  const [stats, setStats] = useState(null);
+  const [matches, setMatches] = useState([]);
+  const [loadingMatches, setLoadingMatches] = useState(false);
+  const hasToken = Boolean(getToken());
 
-  const featuredOpps = opportunities.slice(0, 3);
+  useEffect(() => {
+    if (!hasToken) return;
 
-  const topInstitutions = [
-    {
-      name: 'University of Nairobi',
-      location: 'Nairobi, Kenya',
-      category: 'Public University',
-      tag: 'HEF & Research Partner',
-      gradient: 'from-blue-700 to-indigo-900',
-    },
-    {
-      name: 'Safaricom HQ',
-      location: 'Waiyaki Way, Nairobi',
-      category: 'Telecommunications & Tech',
-      tag: 'Youth Attachments',
-      gradient: 'from-emerald-600 to-teal-900',
-    },
-    {
-      name: 'KRA Times Tower',
-      location: 'Haile Selassie Ave, Nairobi',
-      category: 'Government Agency',
-      tag: 'Graduate Trainee Scheme',
-      gradient: 'from-rose-700 to-red-950',
-    },
-    {
-      name: 'Equity Centre',
-      location: 'Upper Hill, Nairobi',
-      category: 'Financial & Philanthropy',
-      tag: 'ELP Fellowships',
-      gradient: 'from-amber-600 to-orange-900',
-    },
-  ];
+    const fetchDashboardData = async () => {
+      try {
+        const statsData = await api.getTrackerStats();
+        setStats(statsData);
+      } catch (err) {
+        setStats(null);
+      }
 
-  const officialPartners = [
-    { name: 'Higher Education Financing (HEF)', url: 'https://www.hef.co.ke', category: 'Scholarships & Loans' },
-    { name: 'Safaricom Career Portal', url: 'https://www.safaricom.co.ke/careers', category: 'Industrial Attachments' },
-    { name: 'Public Service Commission (PSC PSIP)', url: 'https://www.publicservice.go.ke', category: 'Government Internships' },
-    { name: 'Chevening UK Government', url: 'https://www.chevening.org/scholarship/kenya', category: 'International Masters' },
-    { name: 'DAAD German Exchange Service', url: 'https://www.daad.or.ke', category: 'Postgraduate Fellowships' },
-  ];
+      setLoadingMatches(true);
+      try {
+        const matchData = await api.getPersonalizedMatches();
+        setMatches(matchData.slice(0, 3));
+      } catch (err) {
+        setMatches([]);
+      } finally {
+        setLoadingMatches(false);
+      }
+    };
+
+    fetchDashboardData();
+  }, [hasToken]);
+
+  const verifiedOpps = opportunities.filter((o) => o.is_verified);
+  const activeOpps = opportunities.filter((o) => o.is_open);
+  const totalVerifiedProviders = new Set(opportunities.map((o) => o.provider)).size;
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-200">
-      
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        
-        <div className="lg:col-span-2 rounded-3xl bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-300 p-8 text-slate-900 shadow-sm relative overflow-hidden flex flex-col justify-between min-h-[220px]">
-          <div className="max-w-md z-10 space-y-2">
-            <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-slate-900/10 text-slate-900 font-bold text-[11px] tracking-wide uppercase">
-              <Sparkles className="w-3.5 h-3.5 text-amber-800" />
-              <span>Agentic AI Grounded in Kenya</span>
-            </span>
-            <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-950">
-              Explore new opportunities
-            </h2>
-            <p className="text-xs sm:text-sm font-medium text-slate-800 leading-relaxed">
-              Opportunity search made smarter and simpler. Use our grounded AI assistant to discover attachments, scholarships, and graduate schemes with certified eligibility criteria.
-            </p>
+    <div className="space-y-8 animate-fade-in">
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-brand-950 text-white p-8 md:p-10 shadow-xl border border-slate-800">
+        <div className="relative z-10 max-w-2xl">
+          <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-brand-500/20 border border-brand-400/30 text-brand-300 text-xs font-semibold uppercase tracking-wider mb-4">
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Agentic Intelligence & Deterministic Verification</span>
           </div>
+          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white mb-3">
+            Opportunities built for your academic journey.
+          </h1>
+          <p className="text-sm text-slate-300 leading-relaxed mb-6 font-normal">
+            Kenya's verified university intelligence hub. Zero halluncinations, strict source attribution, and deterministic eligibility evaluations for attachments, scholarships, and graduate programs.
+          </p>
 
-          <div className="pt-4 z-10 flex items-center space-x-3">
-            <button
-              onClick={onNavigateToAI}
-              className="px-6 py-2.5 bg-slate-950 hover:bg-slate-800 text-white font-bold text-xs rounded-full shadow-md transition-all hover:scale-[1.02]"
-            >
-              Try AI Advisor now
-            </button>
+          <div className="flex flex-wrap gap-3">
             <button
               onClick={onNavigateToExplore}
-              className="px-4 py-2.5 bg-white/60 hover:bg-white text-slate-900 font-bold text-xs rounded-full transition-colors"
+              className="inline-flex items-center space-x-2 px-5 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold transition-all shadow-md shadow-brand-600/30 active:scale-95"
             >
-              Browse All Records
+              <Compass className="w-4 h-4" />
+              <span>Explore All Opportunities</span>
             </button>
-          </div>
-
-          <div className="absolute right-4 bottom-2 opacity-90 hidden sm:block pointer-events-none">
-            <div className="w-36 h-36 rounded-full bg-yellow-200/50 flex items-center justify-center">
-              <GraduationCap className="w-24 h-24 text-amber-900/30" />
-            </div>
+            {onNavigateToMatches && (
+              <button
+                onClick={onNavigateToMatches}
+                className="inline-flex items-center space-x-2 px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition-all shadow-md shadow-amber-500/20 active:scale-95"
+              >
+                <Sparkles className="w-4 h-4 text-slate-950" />
+                <span>Personalized Matches</span>
+              </button>
+            )}
+            <button
+              onClick={onNavigateToAI}
+              className="inline-flex items-center space-x-2 px-5 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 text-slate-200 border border-slate-700 text-xs font-bold transition-all active:scale-95"
+            >
+              <Bot className="w-4 h-4 text-amber-400" />
+              <span>Ask AI Advisor</span>
+            </button>
           </div>
         </div>
 
-        <div className="rounded-3xl bg-slate-950 p-6 text-white shadow-sm flex flex-col justify-between relative overflow-hidden">
-          <div>
-            <div className="flex items-center justify-between text-xs text-slate-400 mb-3">
-              <span className="font-semibold uppercase tracking-wider text-[10px] text-amber-400">
-                Authoritative Countdown
-              </span>
-              <Clock className="w-4 h-4 text-amber-400" />
-            </div>
+        <div className="absolute -right-10 -bottom-10 w-96 h-96 bg-brand-600/10 rounded-full blur-3xl pointer-events-none" />
+      </div>
 
-            {upcomingClosingOpp ? (
-              <div className="space-y-2">
-                <span className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-400/20 text-amber-300 border border-amber-400/30">
-                  {upcomingClosingOpp.deadline_status_label || 'Active Intake'}
-                </span>
-                <h3 className="font-bold text-base text-white line-clamp-2">
-                  {upcomingClosingOpp.title}
-                </h3>
-                <p className="text-xs text-slate-400">
-                  Provider: <span className="text-slate-200">{upcomingClosingOpp.provider}</span>
-                </p>
-                <div className="text-[11px] text-slate-400 flex items-center space-x-1.5 pt-1">
-                  <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Closing Date: {upcomingClosingOpp.application_deadline || 'Rolling Intake'}</span>
-                </div>
-              </div>
-            ) : (
-              <p className="text-xs text-slate-400">No urgent deadlines approaching.</p>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center space-x-4">
+          <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+            <Compass className="w-6 h-6" />
+          </div>
+          <div>
+            <p className="text-2xl font-black text-slate-900">{opportunities.length}</p>
+            <p className="text-xs font-semibold text-slate-500">Curated Listings</p>
+          </div>
+        </div>
+
+        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center space-x-4">
+          <div className="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
+            <ShieldCheck className="w-6 h-6" />
+          </div>
+          <div>
+            <p className="text-2xl font-black text-slate-900">{verifiedOpps.length}</p>
+            <p className="text-xs font-semibold text-slate-500">Strictly Verified</p>
+          </div>
+        </div>
+
+        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center space-x-4">
+          <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold">
+            <Award className="w-6 h-6" />
+          </div>
+          <div>
+            <p className="text-2xl font-black text-slate-900">{totalVerifiedProviders}</p>
+            <p className="text-xs font-semibold text-slate-500">Official Providers</p>
+          </div>
+        </div>
+
+        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center space-x-4">
+          <div className="w-12 h-12 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center font-bold">
+            <Clock className="w-6 h-6" />
+          </div>
+          <div>
+            <p className="text-2xl font-black text-slate-900">{activeOpps.length}</p>
+            <p className="text-xs font-semibold text-slate-500">Applications Open</p>
+          </div>
+        </div>
+      </div>
+
+      {hasToken && stats && (
+        <div className="bg-white rounded-3xl border border-slate-200/80 p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center space-x-2">
+              <TrendingUp className="w-5 h-5 text-brand-600" />
+              <h2 className="text-base font-bold text-slate-900">Your Application Pipeline</h2>
+            </div>
+            {onNavigateToPlanner && (
+              <button
+                onClick={onNavigateToPlanner}
+                className="text-xs font-semibold text-brand-600 hover:text-brand-700 flex items-center space-x-1"
+              >
+                <span>View Full Planner</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
             )}
           </div>
 
-          <div className="pt-4">
-            <button
-              onClick={() => upcomingClosingOpp && onSelectOpportunity(upcomingClosingOpp)}
-              className="w-full py-2.5 px-4 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs rounded-xl transition-colors shadow-sm text-center"
-            >
-              View Application Details
-            </button>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
+              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Total Tracked</span>
+              <p className="text-xl font-extrabold text-slate-900 mt-1">{stats.total_tracked}</p>
+            </div>
+            <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-100">
+              <span className="text-[11px] font-semibold text-amber-700 uppercase tracking-wider">In Progress</span>
+              <p className="text-xl font-extrabold text-amber-900 mt-1">
+                {(stats.by_stage?.Drafting || 0) + (stats.by_stage?.Saved || 0)}
+              </p>
+            </div>
+            <div className="p-3.5 rounded-2xl bg-blue-50 border border-blue-100">
+              <span className="text-[11px] font-semibold text-blue-700 uppercase tracking-wider">Submitted / Review</span>
+              <p className="text-xl font-extrabold text-blue-900 mt-1">
+                {(stats.by_stage?.Submitted || 0) + (stats.by_stage?.Interview || 0)}
+              </p>
+            </div>
+            <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-100">
+              <span className="text-[11px] font-semibold text-emerald-700 uppercase tracking-wider">Tasks Done</span>
+              <p className="text-xl font-extrabold text-emerald-900 mt-1">
+                {stats.completed_tasks} / {stats.total_tasks}
+              </p>
+            </div>
           </div>
         </div>
+      )}
 
-      </div>
-
-      <div className="space-y-4">
-        <div className="flex justify-between items-center">
-          <div>
-            <h3 className="text-lg font-bold text-slate-900">Featured Opportunities</h3>
-            <p className="text-xs text-slate-500">Verified official programs with open applications for Kenyan students</p>
+      {matches.length > 0 && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-bold text-slate-900 flex items-center space-x-2">
+                <Sparkles className="w-5 h-5 text-amber-500" />
+                <span>Top Personalized Recommendations</span>
+              </h2>
+              <p className="text-xs text-slate-500">Evaluated deterministically from your degree, field, and year</p>
+            </div>
+            {onNavigateToMatches && (
+              <button
+                onClick={onNavigateToMatches}
+                className="text-xs font-semibold text-brand-600 hover:text-brand-700 flex items-center space-x-1"
+              >
+                <span>See all matches</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
-          <button
-            onClick={onNavigateToExplore}
-            className="text-xs font-bold text-brand-600 hover:text-brand-800 flex items-center space-x-1"
-          >
-            <span>See all</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </button>
-        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          {featuredOpps.map((opp) => (
-            <div
-              key={opp.id}
-              className="bg-white rounded-3xl p-5 border border-slate-200/80 hover:border-brand-300 hover:shadow-md transition-all duration-200 flex flex-col justify-between"
-            >
-              <div className="space-y-3">
-                <div className="flex justify-between items-start gap-2">
-                  <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-brand-50 text-brand-700">
-                    {opp.category}
-                  </span>
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                    opp.days_remaining !== null && opp.days_remaining <= 7
-                      ? 'bg-rose-100 text-rose-700'
-                      : 'bg-emerald-50 text-emerald-700'
-                  }`}>
-                    {opp.deadline_status_label || opp.status}
-                  </span>
-                </div>
-
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {matches.map((item) => (
+              <div
+                key={item.opportunity.id}
+                className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between"
+              >
                 <div>
-                  <h4 
-                    onClick={() => onSelectOpportunity(opp)}
-                    className="font-bold text-sm text-slate-900 hover:text-brand-600 cursor-pointer line-clamp-2"
-                  >
-                    {opp.title}
-                  </h4>
-                  <p className="text-xs text-slate-500 mt-1 flex items-center space-x-1">
-                    <Building2 className="w-3 h-3 text-slate-400" />
-                    <span className="truncate">{opp.provider}</span>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-brand-50 text-brand-700">
+                      {item.opportunity.category}
+                    </span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                      item.eligibility_status === 'Meets requirements'
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                        : 'bg-amber-50 text-amber-700 border border-amber-200'
+                    }`}>
+                      {item.match_score}% Match
+                    </span>
+                  </div>
+                  <h3 className="font-bold text-sm text-slate-900 line-clamp-1">{item.opportunity.title}</h3>
+                  <p className="text-xs font-medium text-slate-500 mt-0.5">{item.opportunity.provider}</p>
+                  <p className="text-[11px] text-slate-600 mt-3 line-clamp-2 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                    {item.match_explanation}
                   </p>
                 </div>
 
-                <div className="pt-2 border-t border-slate-100 text-[11px] text-slate-600 space-y-1">
-                  <p><span className="font-semibold text-slate-700">Target:</span> {opp.target_audience || 'University Students'}</p>
-                  <p><span className="font-semibold text-slate-700">Degree:</span> {opp.degree_levels || 'Undergraduate'}</p>
+                <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
+                  <button
+                    onClick={() => onSelectOpportunity(item.opportunity)}
+                    className="text-xs font-bold text-brand-600 hover:text-brand-800"
+                  >
+                    View Details
+                  </button>
+                  <button
+                    onClick={() => onCheckEligibility(item.opportunity)}
+                    className="text-xs font-semibold text-slate-600 hover:text-slate-900"
+                  >
+                    Verify Criteria
+                  </button>
                 </div>
               </div>
+            ))}
+          </div>
+        </div>
+      )}
 
-              <div className="pt-4 mt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                <button
-                  onClick={() => onCheckEligibility(opp)}
-                  className="flex-1 py-1.5 px-3 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 font-semibold text-xs border border-slate-200 transition-colors flex items-center justify-center space-x-1"
-                >
-                  <CheckCircle2 className="w-3.5 h-3.5 text-brand-600" />
-                  <span>Check Criteria</span>
-                </button>
-                <button
-                  onClick={() => onSelectOpportunity(opp)}
-                  className="py-1.5 px-3 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-semibold text-xs transition-colors"
-                >
-                  Details
-                </button>
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-slate-900">Featured Kenya Opportunities</h2>
+            <p className="text-xs text-slate-500">Official postings verified for Kenyan university students</p>
+          </div>
+          <button
+            onClick={onNavigateToExplore}
+            className="text-xs font-semibold text-brand-600 hover:text-brand-700 flex items-center space-x-1"
+          >
+            <span>View directory</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          {opportunities.slice(0, 6).map((opp) => (
+            <div
+              key={opp.id}
+              className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between"
+            >
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-slate-100 text-slate-700">
+                    {opp.category}
+                  </span>
+                  {opp.is_verified && (
+                    <span className="inline-flex items-center space-x-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md">
+                      <ShieldCheck className="w-3 h-3" />
+                      <span>Verified</span>
+                    </span>
+                  )}
+                </div>
+
+                <h3 className="font-bold text-sm text-slate-900 line-clamp-2 leading-snug">{opp.title}</h3>
+                <p className="text-xs font-medium text-slate-500 mt-1">{opp.provider}</p>
+
+                <p className="text-xs text-slate-600 mt-3 line-clamp-3 leading-relaxed">
+                  {opp.description}
+                </p>
+              </div>
+
+              <div className="mt-5 pt-4 border-t border-slate-100 space-y-3">
+                <div className="flex items-center justify-between text-[11px] text-slate-500">
+                  <span className="inline-flex items-center space-x-1">
+                    <Calendar className="w-3.5 h-3.5" />
+                    <span>{opp.deadline ? `Deadline: ${new Date(opp.deadline).toLocaleDateString()}` : 'Rolling Deadline'}</span>
+                  </span>
+                  <span className={`font-semibold ${opp.is_open ? 'text-emerald-600' : 'text-slate-400'}`}>
+                    {opp.is_open ? 'Open' : 'Closed'}
+                  </span>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => onSelectOpportunity(opp)}
+                    className="flex-1 py-1.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-xs transition-colors"
+                  >
+                    Details
+                  </button>
+                  <button
+                    onClick={() => onCheckEligibility(opp)}
+                    className="flex-1 py-1.5 px-3 rounded-xl bg-brand-50 hover:bg-brand-100 text-brand-700 font-semibold text-xs transition-colors"
+                  >
+                    Check Fit
+                  </button>
+                </div>
               </div>
             </div>
           ))}
         </div>
       </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        <div className="lg:col-span-2 space-y-4">
-          <div>
-            <h3 className="text-lg font-bold text-slate-900">Top Opportunity Providers in Kenya</h3>
-            <p className="text-xs text-slate-500">Certified organizations offering recurring attachments, scholarships, and trainee programs</p>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {topInstitutions.map((inst, idx) => (
-              <div
-                key={idx}
-                className={`rounded-2xl p-5 bg-gradient-to-br ${inst.gradient} text-white shadow-sm flex flex-col justify-between min-h-[140px] relative overflow-hidden group hover:scale-[1.01] transition-transform`}
-              >
-                <div>
-                  <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-white/20 backdrop-blur-sm text-white">
-                    {inst.tag}
-                  </span>
-                  <h4 className="font-bold text-base mt-2 text-white">{inst.name}</h4>
-                  <p className="text-xs text-white/80">{inst.location}</p>
-                </div>
-
-                <div className="flex justify-between items-center pt-3 border-t border-white/10 text-[11px] text-white/90">
-                  <span>{inst.category}</span>
-                  <ArrowRight className="w-4 h-4 transform group-hover:translate-x-1 transition-transform" />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <div>
-            <h3 className="text-lg font-bold text-slate-900">Official Direct Portals</h3>
-            <p className="text-xs text-slate-500">Original government & agency submission sources</p>
-          </div>
-
-          <div className="bg-white rounded-3xl p-4 border border-slate-200/80 space-y-2">
-            {officialPartners.map((p, idx) => (
-              <a
-                key={idx}
-                href={p.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center justify-between p-3 rounded-2xl hover:bg-slate-50 border border-transparent hover:border-slate-200 transition-all group"
-              >
-                <div className="flex items-center space-x-3 min-w-0">
-                  <div className="w-8 h-8 rounded-xl bg-brand-50 text-brand-700 flex items-center justify-center font-bold text-xs flex-shrink-0">
-                    <ShieldCheck className="w-4 h-4 text-brand-600" />
-                  </div>
-                  <div className="truncate">
-                    <p className="text-xs font-bold text-slate-800 truncate group-hover:text-brand-600 transition-colors">
-                      {p.name}
-                    </p>
-                    <p className="text-[10px] text-slate-400 truncate">{p.category}</p>
-                  </div>
-                </div>
-
-                <div className="w-7 h-7 rounded-full bg-slate-100 group-hover:bg-brand-600 group-hover:text-white flex items-center justify-center text-slate-400 transition-colors flex-shrink-0 ml-2">
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </div>
-              </a>
-            ))}
-          </div>
-        </div>
-
-      </div>
-
     </div>
   );
 }

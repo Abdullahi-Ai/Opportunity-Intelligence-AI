@@ -183,6 +183,36 @@ export const api = {
     });
   },
 
+  getPersonalizedMatches: (studentId = null) => {
+    return studentId
+      ? request(`/students/${encodeURIComponent(studentId)}/matches`)
+      : request('/matches');
+  },
+
+  updateApplicationNotes: (trackedAppId, notes) => {
+    return request(`/tracker/${encodeURIComponent(trackedAppId)}/notes`, {
+      method: 'PATCH',
+      body: JSON.stringify({ notes }),
+    });
+  },
+
+  updateApplicationTargetDate: (trackedAppId, targetSubmissionDate) => {
+    return request(`/tracker/${encodeURIComponent(trackedAppId)}/target-date`, {
+      method: 'PATCH',
+      body: JSON.stringify({ target_submission_date: targetSubmissionDate }),
+    });
+  },
+
+  generateChecklistForTrackedApp: (trackedAppId) => {
+    return request(`/tracker/${encodeURIComponent(trackedAppId)}/generate-checklist`, {
+      method: 'POST',
+    });
+  },
+
+  getTrackedApplicationDetail: (trackedAppId) => {
+    return request(`/tracker/application/${encodeURIComponent(trackedAppId)}`);
+  },
+
   getDashboardStats: (studentId) => request(`/tracker/${studentId}/stats`),
 
   adminCreateOpportunity: (data) => {

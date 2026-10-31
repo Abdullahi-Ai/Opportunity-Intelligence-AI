@@ -150,6 +150,157 @@ class DashboardStatsResponse(BaseModel):
     checklist_completion_rate: float
     urgent_deadlines_count: int
 
+class PersonalizedMatchItem(BaseModel):
+    opportunity_id: str
+    title: str
+    provider: str
+    category: str
+    official_url: str
+    deadline: Optional[str] = None
+    days_remaining: Optional[int] = None
+    deadline_status_label: Optional[str] = None
+    is_verified: bool = True
+    eligibility_status: str
+    match_score: int
+    match_explanation: str
+    is_saved: bool = False
+    criteria_breakdown: List[Dict[str, str]] = []
+
+class PersonalizedMatchesResponse(BaseModel):
+    student_id: str
+    student_name: str
+    total_matches: int
+    matches: List[PersonalizedMatchItem]
+
+class UpdateNotesRequest(BaseModel):
+    notes: Optional[str] = None
+
+class UpdateTargetDateRequest(BaseModel):
+    target_submission_date: Optional[str] = None
+
+def calculate_personalized_matches(student: StudentProfile, db: Session) -> PersonalizedMatchesResponse:
+    opps = db.query(Opportunity).all()
+    tracked = db.query(TrackedApplication).filter(TrackedApplication.student_id == student.id).all()
+    saved_ids = {app.opportunity_id for app in tracked}
+
+    student_deg = (student.degree_level or "Undergraduate").strip().lower()
+    student_field = (student.field_of_study or "").strip().lower()
+    student_yr = student.year_of_study or 1
+    student_prefs = [p.strip().lower() for p in (student.preferred_categories or "").split(",") if p.strip()]
+
+    matches = []
+
+    for opp in opps:
+        cd = tool_calculate_deadline_countdown(
+            DeadlineCountdownInput(deadline_date_str=opp.application_deadline)
+        )
+        days_rem = cd.get("days_remaining")
+        dl_label = cd.get("status_label") or opp.status
+        is_open = cd.get("is_open", False)
+
+        allowed_degs = [d.strip().lower() for d in (opp.degree_levels or "").split(",") if d.strip()]
+        allowed_fields = [f.strip().lower() for f in (opp.fields_of_study or "").split(",") if f.strip()]
+
+        breakdown = []
+        deg_meets = not allowed_degs or any(student_deg in d or d in student_deg for d in allowed_degs)
+        breakdown.append({
+            "criterion": "Degree Level",
+            "required": opp.degree_levels or "All Degree Levels",
+            "provided": student.degree_level,
+            "status": "Meets" if deg_meets else "Does Not Meet"
+        })
+
+        if not allowed_fields or "all fields" in allowed_fields:
+            field_meets = True
+            field_status = "Meets"
+        elif any(student_field in f or f in student_field for f in allowed_fields):
+            field_meets = True
+            field_status = "Meets"
+        elif any(w in student_field for f in allowed_fields for w in f.split()):
+            field_meets = False
+            field_status = "Needs Verification"
+        else:
+            field_meets = False
+            field_status = "Does Not Meet"
+        breakdown.append({
+            "criterion": "Field of Study",
+            "required": opp.fields_of_study or "All Fields",
+            "provided": student.field_of_study,
+            "status": field_status
+        })
+
+        yr_meets = True
+        if "attachment" in opp.id.lower() or "attachment" in opp.title.lower():
+            if student_yr in [2, 3, 4]:
+                yr_status = "Meets"
+            else:
+                yr_status = "Does Not Meet"
+                yr_meets = False
+            breakdown.append({
+                "criterion": "Continuing Student Year (Attachment)",
+                "required": "2nd, 3rd, or 4th Year continuing student",
+                "provided": f"Year {student_yr}",
+                "status": yr_status
+            })
+
+        statuses = [b["status"] for b in breakdown]
+        if "Does Not Meet" in statuses:
+            eligibility_status = "Does not meet requirements"
+            base_score = 15 if (deg_meets or field_meets) else 0
+        elif "Needs Verification" in statuses:
+            eligibility_status = "Needs verification"
+            base_score = 45
+        else:
+            eligibility_status = "Meets requirements"
+            base_score = 60
+
+        field_bonus = 20 if field_status == "Meets" else (10 if "all fields" in allowed_fields or not allowed_fields else 0)
+        deg_bonus = 10 if deg_meets else 0
+        pref_bonus = 5 if (not student_prefs or opp.category.lower() in student_prefs) else 0
+        deadline_bonus = 5 if is_open else 0
+
+        score = min(100, max(0, base_score + field_bonus + deg_bonus + pref_bonus + deadline_bonus))
+
+        reasons = []
+        if deg_meets:
+            reasons.append(f"Eligible for {student.degree_level} students")
+        if field_status == "Meets":
+            reasons.append(f"Matches your course in {student.field_of_study}")
+        elif field_status == "Needs Verification":
+            reasons.append(f"Related to {student.field_of_study} (requires verification)")
+        if "attachment" in opp.id.lower() and yr_meets:
+            reasons.append(f"Year {student_yr} qualifies for continuing industrial attachment")
+        if dl_label:
+            reasons.append(f"Deadline: {dl_label}")
+
+        explanation = "; ".join(reasons) + "."
+
+        matches.append(PersonalizedMatchItem(
+            opportunity_id=opp.id,
+            title=opp.title,
+            provider=opp.provider,
+            category=opp.category,
+            official_url=opp.official_url,
+            deadline=opp.application_deadline,
+            days_remaining=days_rem,
+            deadline_status_label=dl_label,
+            is_verified=opp.is_verified,
+            eligibility_status=eligibility_status,
+            match_score=score,
+            match_explanation=explanation,
+            is_saved=opp.id in saved_ids,
+            criteria_breakdown=breakdown
+        ))
+
+    matches.sort(key=lambda m: (m.eligibility_status == "Meets requirements", m.match_score), reverse=True)
+
+    return PersonalizedMatchesResponse(
+        student_id=student.id,
+        student_name=student.full_name,
+        total_matches=len(matches),
+        matches=matches
+    )
+
 @router.get("/opportunities", response_model=List[OpportunitySummaryResponse])
 def list_opportunities(
     category: Optional[str] = Query(None, description="Filter by category: Scholarship, Internship, Graduate Trainee, etc."),
@@ -554,3 +705,116 @@ def get_dashboard_stats(
         checklist_completion_rate=completion_rate,
         urgent_deadlines_count=urgent_count
     )
+
+@router.get("/matches", response_model=PersonalizedMatchesResponse)
+def get_current_user_matches(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    student = resolve_student_for_user(current_user, db)
+    return calculate_personalized_matches(student, db)
+
+@router.get("/students/{student_id}/matches", response_model=PersonalizedMatchesResponse)
+def get_student_matches(
+    student_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    student = resolve_student_for_user(current_user, db, requested_student_id=student_id)
+    return calculate_personalized_matches(student, db)
+
+@router.patch("/tracker/{tracked_app_id}/notes")
+def update_application_notes(
+    tracked_app_id: str,
+    payload: UpdateNotesRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    tracked_app = db.query(TrackedApplication).filter(TrackedApplication.id == tracked_app_id).first()
+    if not tracked_app:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tracked application not found.")
+    if current_user.role != "admin":
+        student = resolve_student_for_user(current_user, db)
+        if tracked_app.student_id != student.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: Cannot edit another student's application notes.")
+    tracked_app.notes = payload.notes
+    db.commit()
+    return {"status": "success", "notes": tracked_app.notes}
+
+@router.patch("/tracker/{tracked_app_id}/target-date")
+def update_application_target_date(
+    tracked_app_id: str,
+    payload: UpdateTargetDateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    tracked_app = db.query(TrackedApplication).filter(TrackedApplication.id == tracked_app_id).first()
+    if not tracked_app:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tracked application not found.")
+    if current_user.role != "admin":
+        student = resolve_student_for_user(current_user, db)
+        if tracked_app.student_id != student.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: Cannot edit another student's application date.")
+    
+    if payload.target_submission_date:
+        val = payload.target_submission_date.strip()
+        if "T" in val:
+            val = val.split("T")[0]
+        try:
+            tracked_app.target_submission_date = datetime.strptime(val, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid date format. Expected YYYY-MM-DD.")
+    else:
+        tracked_app.target_submission_date = None
+    db.commit()
+    return {
+        "status": "success",
+        "target_submission_date": str(tracked_app.target_submission_date) if tracked_app.target_submission_date else None
+    }
+
+@router.post("/tracker/{tracked_app_id}/generate-checklist")
+def generate_checklist_for_tracked_application(
+    tracked_app_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    tracked_app = db.query(TrackedApplication).filter(TrackedApplication.id == tracked_app_id).first()
+    if not tracked_app:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tracked application not found.")
+    if current_user.role != "admin":
+        student = resolve_student_for_user(current_user, db)
+        if tracked_app.student_id != student.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
+
+    chk_res = tool_generate_application_checklist(GenerateChecklistInput(opportunity_id=tracked_app.opportunity_id))
+    existing_tasks = {c.task_description for c in tracked_app.checklists}
+    added = 0
+    if chk_res.get("status") == "success":
+        for item in chk_res.get("tasks", []):
+            if item["task"] not in existing_tasks:
+                chk = ApplicationChecklist(
+                    tracked_application_id=tracked_app.id,
+                    task_description=item["task"],
+                    required_document_type=item.get("section", "General"),
+                    is_completed=False
+                )
+                db.add(chk)
+                added += 1
+        db.commit()
+    return {"status": "success", "tasks_added": added, "total_tasks": len(tracked_app.checklists)}
+
+@router.get("/tracker/application/{tracked_app_id}", response_model=TrackedApplicationResponse)
+def get_tracked_application_detail(
+    tracked_app_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    tracked_app = db.query(TrackedApplication).filter(TrackedApplication.id == tracked_app_id).first()
+    if not tracked_app:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tracked application not found.")
+    if current_user.role != "admin":
+        student = resolve_student_for_user(current_user, db)
+        if tracked_app.student_id != student.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
+    return tracked_app
+

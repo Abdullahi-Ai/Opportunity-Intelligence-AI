@@ -5,7 +5,8 @@ import TopHeader from './components/TopHeader';
 import HomeDashboard from './components/HomeDashboard';
 import OpportunityExplorer from './components/OpportunityExplorer';
 import AIAdvisorWorkspace from './components/AIAdvisorWorkspace';
-import ApplicationTracker from './components/ApplicationTracker';
+import ApplicationPlanner from './components/ApplicationPlanner';
+import PersonalizedMatches from './components/PersonalizedMatches';
 import OpportunityModal from './components/OpportunityModal';
 import EligibilityChecker from './components/EligibilityChecker';
 import ProfileModal from './components/ProfileModal';
@@ -174,6 +175,28 @@ export default function App() {
               onCheckEligibility={(opp) => setEligibilityOpportunity(opp)}
               onNavigateToExplore={() => setActiveTab('explore')}
               onNavigateToAI={() => setActiveTab('ai-workspace')}
+              onNavigateToMatches={() => setActiveTab('matches')}
+              onNavigateToPlanner={() => setActiveTab('planner')}
+            />
+          )}
+
+          {activeTab === 'matches' && (
+            <PersonalizedMatches
+              user={user}
+              student={student}
+              onOpenAuth={() => setIsAuthOpen(true)}
+              onOpenProfile={() => (user ? setIsProfileOpen(true) : setIsAuthOpen(true))}
+              onSelectOpportunity={(opp) => setSelectedOpportunity(opp)}
+              onCheckEligibility={(opp) => setEligibilityOpportunity(opp)}
+            />
+          )}
+
+          {(activeTab === 'planner' || activeTab === 'tracker') && (
+            <ApplicationPlanner
+              student={student}
+              onOpenAssistant={() => setActiveTab('ai-workspace')}
+              onOpenExplore={() => setActiveTab('explore')}
+              onSelectOpportunity={(opp) => setSelectedOpportunity(opp)}
             />
           )}
 
@@ -199,13 +222,6 @@ export default function App() {
             <AIAdvisorWorkspace
               student={student}
               user={user}
-            />
-          )}
-
-          {activeTab === 'tracker' && (
-            <ApplicationTracker
-              student={student}
-              onOpenAssistant={() => setActiveTab('ai-workspace')}
             />
           )}
 

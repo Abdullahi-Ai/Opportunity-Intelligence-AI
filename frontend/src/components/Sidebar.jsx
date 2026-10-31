@@ -26,8 +26,9 @@ export default function Sidebar({
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: Home },
     { id: 'explore', label: 'Discover Opportunities', icon: Compass },
+    { id: 'matches', label: 'Personalized Matches', icon: Sparkles, badge: 'Smart' },
+    { id: 'planner', label: 'Application Planner', icon: BookmarkCheck },
     { id: 'ai-workspace', label: 'AI Advisor Workspace', icon: Bot, badge: 'RAG' },
-    { id: 'tracker', label: 'My Applications', icon: BookmarkCheck },
     { id: 'eligibility', label: 'Eligibility Checker', icon: CheckCircle2 },
   ];
 

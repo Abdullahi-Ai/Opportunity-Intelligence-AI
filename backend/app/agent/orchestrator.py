@@ -695,18 +695,113 @@ class AgentOrchestrator:
             "intent": IntentType.PREFERENCE_UPDATE.value
         }
 
+    def _handle_tracking_progress(
+        self,
+        state: ConversationState,
+        authenticated_student_id: Optional[str] = None,
+        db: Optional[Session] = None
+    ) -> Dict[str, Any]:
+        """Handles student questions regarding their tracked applications and progress."""
+        from app.agent.tools import GetTrackedApplicationsInput, tool_get_tracked_applications
+        tracking_res = tool_get_tracked_applications(
+            GetTrackedApplicationsInput(),
+            authenticated_student_id=authenticated_student_id,
+            db=db
+        )
+
+        tool_calls = [{"tool": "get_tracked_applications", "status": tracking_res.get("status", "success")}]
+        citations: List[Dict[str, str]] = []
+
+        if tracking_res.get("status") == "unauthenticated":
+            reply = (
+                "You are not currently logged in or have not linked a student profile. "
+                "Please sign in and save opportunities to your Application Planner to monitor deadlines and tasks."
+            )
+            return {"response": reply, "tool_calls": tool_calls, "citations": citations}
+
+        apps = tracking_res.get("applications", [])
+        if not apps:
+            reply = (
+                "You are not currently tracking any applications in your Application Planner.\n\n"
+                "💡 **How to start:**\n"
+                "1. Visit the **Personalized Matches** or **Discover** page.\n"
+                "2. Click **'Save to Planner'** on opportunities that match your course.\n"
+                "3. Your checklist, deadlines, and progress will automatically appear here!"
+            )
+            return {"response": reply, "tool_calls": tool_calls, "citations": citations}
+
+        app_summaries = []
+        all_pending_tasks = []
+        urgent_deadlines = []
+
+        for app in apps:
+            title = app.get("title", "Opportunity")
+            stage = app.get("stage", "Saved")
+            url = app.get("official_url")
+            dl = app.get("deadline") or "Rolling"
+            days_rem = app.get("days_remaining")
+            dl_status = app.get("deadline_status") or "Active"
+            comp_cnt = app.get("completed_tasks", 0)
+            tot_cnt = app.get("tasks_count", 0)
+            pending = app.get("pending_tasks", [])
+
+            if url and not any(c["url"] == url for c in citations):
+                citations.append({"title": title, "url": url})
+
+            if days_rem is not None and 0 <= days_rem <= 14:
+                urgent_deadlines.append(f"⚠️ **{title}**: Closes in **{days_rem} days** ({dl})")
+
+            for p in pending:
+                all_pending_tasks.append(f"- **{title}**: {p}")
+
+            app_summaries.append(
+                f"### [{title}]({url or '#'})\n"
+                f"- **Stage:** `{stage}` | **Deadline:** {dl} (`{dl_status}`)\n"
+                f"- **Checklist Progress:** {comp_cnt}/{tot_cnt} tasks completed"
+                + (f" ({len(pending)} pending)" if pending else " (All done! 🎉)")
+            )
+
+        reply_parts = [
+            f"You are currently tracking **{len(apps)} application(s)**:\n",
+            "\n\n".join(app_summaries)
+        ]
+
+        if urgent_deadlines:
+            reply_parts.append("\n\n---\n#### ⏰ Approaching Deadlines:\n" + "\n".join(urgent_deadlines))
+
+        if all_pending_tasks:
+            reply_parts.append("\n\n---\n#### 📋 Priority Tasks to Work On Next:\n" + "\n".join(all_pending_tasks[:5]))
+            if len(all_pending_tasks) > 5:
+                reply_parts.append(f"\n*(and {len(all_pending_tasks) - 5} more in your Application Planner)*")
+        else:
+            reply_parts.append("\n\n---\n🎉 All current checklist tasks are marked as complete! Review your submission documents before the closing date.")
+
+        return {
+            "response": "\n".join(reply_parts),
+            "tool_calls": tool_calls,
+            "citations": citations
+        }
+
     def _fallback_deterministic_turn(
         self,
         message: str,
         intent: IntentType,
         intent_meta: Dict[str, Any],
-        state: ConversationState
+        state: ConversationState,
+        authenticated_student_id: Optional[str] = None,
+        db: Optional[Session] = None
     ) -> Tuple[str, List[Dict[str, Any]], List[Dict[str, str]]]:
         tool_calls_executed: List[Dict[str, Any]] = []
         citations: List[Dict[str, str]] = []
         final_reply = ""
 
-        if intent == IntentType.OPPORTUNITY_DISCOVERY:
+        if intent == IntentType.TRACKING_PROGRESS:
+            res = self._handle_tracking_progress(state, authenticated_student_id, db)
+            final_reply = res["response"]
+            tool_calls_executed.extend(res["tool_calls"])
+            citations.extend(res["citations"])
+
+        elif intent == IntentType.OPPORTUNITY_DISCOVERY:
             res = self._handle_opportunity_discovery(message, state)
             final_reply = res["response"]
             tool_calls_executed.extend(res["tool_calls"])
@@ -1059,8 +1154,8 @@ class AgentOrchestrator:
             state.student_memory["degree_level"] = entities["degree_level"]
 
         authenticated_student_id = None
-        if student_profile and student_profile.get("id"):
-            authenticated_student_id = student_profile.get("id")
+        if student_profile and (student_profile.get("id") or student_profile.get("student_id")):
+            authenticated_student_id = student_profile.get("id") or student_profile.get("student_id")
         elif user_id and db:
             from app.models.entities import StudentProfile
             sp = db.query(StudentProfile).filter(StudentProfile.user_id == user_id).first()
@@ -1124,7 +1219,9 @@ class AgentOrchestrator:
                     message=message,
                     intent=intent,
                     intent_meta=intent_meta,
-                    state=state
+                    state=state,
+                    authenticated_student_id=authenticated_student_id,
+                    db=db
                 )
 
         if final_reply:
