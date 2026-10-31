@@ -37,11 +37,9 @@ def test_golden_evaluation_dataset_retrieval(initialized_store):
         results = initialized_store.search(query=query, top_k=3)
         retrieved_ids = [r["metadata"].get("opportunity_id") for r in results]
 
-        # Check Hit@1
         if retrieved_ids and retrieved_ids[0] == expected_id:
             hits_at_1 += 1
 
-        # Check Hit@3
         if expected_id in retrieved_ids:
             hits_at_3 += 1
             rank = retrieved_ids.index(expected_id) + 1
@@ -49,7 +47,6 @@ def test_golden_evaluation_dataset_retrieval(initialized_store):
         else:
             reciprocal_ranks.append(0.0)
 
-        # Attribution check
         for r in results:
             if r["metadata"].get("opportunity_id") == expected_id:
                 if r["metadata"].get("official_url") == expected_url:
@@ -69,7 +66,6 @@ def test_golden_evaluation_dataset_retrieval(initialized_store):
     print(f"Source Attribution Rate: {attribution_rate:.2%}")
     print("---------------------------------------")
 
-    # Strict benchmarks
     assert hit_rate_at_3 >= 0.85, f"Hit Rate@3 ({hit_rate_at_3:.2%}) below required 85% threshold."
     assert mrr >= 0.70, f"MRR ({mrr:.4f}) below required 0.70 threshold."
     assert attribution_rate >= 0.90, f"Attribution Rate ({attribution_rate:.2%}) below 90% threshold."
@@ -83,8 +79,6 @@ def test_out_of_domain_handling(initialized_store):
     results = initialized_store.search(query=ood_query, top_k=3)
 
     if results:
-        # Check that top hit has low similarity score
         top_score = results[0]["similarity_score"]
         print(f"Out of domain query top similarity score: {top_score}")
-        # When similarity is low (< 0.5), agent must trigger fallback
         assert top_score < 0.50, f"Expected low similarity score for out-of-domain query, got {top_score}"

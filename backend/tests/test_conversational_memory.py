@@ -36,7 +36,6 @@ def test_memory_1_university_preference_memory():
     conv_id = f"test-uni-{uuid.uuid4().hex[:8]}"
 
     with SessionLocal() as db:
-        # Turn 1: Student states their university
         res1 = orchestrator.process_turn(
             message="I study at University of Nairobi",
             conversation_id=conv_id,
@@ -45,13 +44,11 @@ def test_memory_1_university_preference_memory():
         assert res1["state"]["student_profile"].get("university") == "University of Nairobi"
         assert "University of Nairobi" in res1["response"]
 
-        # Turn 2: Follow-up discovery query
         res2 = orchestrator.process_turn(
             message="Find scholarships for my course",
             conversation_id=conv_id,
             db=db
         )
-        # Verify the orchestrator retained the university in memory state
         assert res2["state"]["student_profile"].get("university") == "University of Nairobi"
 
 
@@ -61,7 +58,6 @@ def test_memory_2_year_of_study_memory_and_eligibility():
     conv_id = f"test-yr-{uuid.uuid4().hex[:8]}"
 
     with SessionLocal() as db:
-        # Turn 1: Student updates year of study
         res1 = orchestrator.process_turn(
             message="I am in my third year of study",
             conversation_id=conv_id,
@@ -69,14 +65,12 @@ def test_memory_2_year_of_study_memory_and_eligibility():
         )
         assert res1["state"]["student_profile"].get("year_of_study") == 3
 
-        # Turn 2: Student checks eligibility for Safaricom attachment
         res2 = orchestrator.process_turn(
             message="Am I eligible for the Safaricom industrial attachment?",
             conversation_id=conv_id,
             db=db
         )
         assert res2["state"]["student_profile"].get("year_of_study") == 3
-        # Third year undergraduate is eligible for Safaricom attachment
         assert "eligible" in res2["response"].lower()
 
 
@@ -88,7 +82,6 @@ def test_memory_3_followup_earliest_deadline_comparison():
     conv_id = f"test-comp-{uuid.uuid4().hex[:8]}"
 
     with SessionLocal() as db:
-        # Turn 1: Search for opportunities
         res1 = orchestrator.process_turn(
             message="Find scholarships in Kenya",
             conversation_id=conv_id,
@@ -96,7 +89,6 @@ def test_memory_3_followup_earliest_deadline_comparison():
         )
         assert len(res1["state"]["discussed_opportunities"]) > 0
 
-        # Turn 2: Student asks for earliest deadline comparison
         res2 = orchestrator.process_turn(
             message="Which one has the earliest deadline?",
             conversation_id=conv_id,
@@ -104,7 +96,6 @@ def test_memory_3_followup_earliest_deadline_comparison():
         )
         assert res2["intent"] == IntentType.OPPORTUNITY_COMPARISON.value
         assert "earliest deadline" in res2["response"].lower() or "deadline" in res2["response"].lower()
-        # Ensure it actually listed the compared opportunities
         assert len(res2["response"]) > 50
 
 
@@ -118,7 +109,6 @@ def test_memory_4_pending_question_contextual_resolution():
     with SessionLocal() as db:
         conv = get_or_create_conversation(db, conv_id)
         state = load_conversation_state(db, conv)
-        # Simulate assistant asking destination clarification
         state.pending_question = {
             "question": "Are you looking for opportunities in Kenya or abroad?",
             "topic": "clarify_destination",
@@ -126,13 +116,11 @@ def test_memory_4_pending_question_contextual_resolution():
         }
         save_conversation_state(db, conv, state)
 
-        # Student replies with a single short answer "Both"
         res = orchestrator.process_turn(
             message="Both",
             conversation_id=conv_id,
             db=db
         )
-        # Verify pending question was resolved
         assert res["state"]["pending_question"] is None
         assert res["state"]["student_memory"].get("destination") == "both"
         assert res["intent"] in [IntentType.SCHOLARSHIP_SEARCH.value, IntentType.OPPORTUNITY_DISCOVERY.value]
@@ -142,7 +130,6 @@ def test_memory_5_conversation_isolation_between_users():
     """Test 5: Two different users have separate conversations;
     neither can access the other's messages via API (HTTP 403).
     """
-    # User 1 registration & conversation
     user1_email = f"u1_{uuid.uuid4().hex[:8]}@uonbi.ac.ke"
     r1 = client.post("/api/v1/auth/register", json={
         "email": user1_email,
@@ -160,7 +147,6 @@ def test_memory_5_conversation_isolation_between_users():
     assert chat1.status_code == 200
     conv1_id = chat1.json()["conversation_id"]
 
-    # User 2 registration
     user2_email = f"u2_{uuid.uuid4().hex[:8]}@ku.ac.ke"
     r2 = client.post("/api/v1/auth/register", json={
         "email": user2_email,
@@ -170,7 +156,6 @@ def test_memory_5_conversation_isolation_between_users():
     })
     token2 = r2.json()["access_token"]
 
-    # User 2 attempts to read User 1's conversation
     access_attempt = client.get(
         f"/api/v1/conversations/{conv1_id}",
         headers={"Authorization": f"Bearer {token2}"}
@@ -183,7 +168,6 @@ def test_memory_6_state_and_message_persistence():
     """Test 6: Reload conversation messages from DB using conversation_id;
     verifies messages, summary, and state persist across reloads.
     """
-    # Turn 1 via API
     resp1 = client.post("/api/v1/chat", json={
         "message": "Hello, I am a 2nd year student at Kenyatta University"
     })
@@ -191,20 +175,18 @@ def test_memory_6_state_and_message_persistence():
     conv_id = resp1.json()["conversation_id"]
     assert conv_id is not None
 
-    # Turn 2 via API
     resp2 = client.post("/api/v1/chat", json={
         "message": "Find internships in tech",
         "conversation_id": conv_id
     })
     assert resp2.status_code == 200
 
-    # Fetch conversation history via GET /api/v1/conversations/{id}
     hist_resp = client.get(f"/api/v1/conversations/{conv_id}")
     assert hist_resp.status_code == 200
     hist_data = hist_resp.json()
 
     assert hist_data["id"] == conv_id
-    assert len(hist_data["messages"]) >= 4  # 2 user turns + 2 assistant replies
+    assert len(hist_data["messages"]) >= 4
     assert hist_data["state"]["student_profile"].get("year_of_study") == 2
     assert "Kenyatta University" in hist_data["state"]["student_profile"].get("university", "")
     assert hist_data["summary"] is not None
@@ -214,22 +196,18 @@ def test_memory_7_conversation_deletion():
     """Test 7: Delete conversation via DELETE /api/v1/conversations/{id};
     verifies record and messages are removed from database.
     """
-    # Create conversation with a message
     init_resp = client.post("/api/v1/chat", json={
         "message": "Hello there"
     })
     assert init_resp.status_code == 200
     conv_id = init_resp.json()["conversation_id"]
 
-    # Ensure it exists
     check_resp = client.get(f"/api/v1/conversations/{conv_id}")
     assert check_resp.status_code == 200
 
-    # Delete conversation
     del_resp = client.delete(f"/api/v1/conversations/{conv_id}")
     assert del_resp.status_code == 200
     assert del_resp.json()["status"] == "success"
 
-    # Subsequent GET must return 404
     after_del = client.get(f"/api/v1/conversations/{conv_id}")
     assert after_del.status_code == 404

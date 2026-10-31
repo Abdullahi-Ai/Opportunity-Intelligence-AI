@@ -67,7 +67,6 @@ export default function AIAssistantDrawer({ isOpen, onClose, student }) {
   return (
     <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-[480px] bg-white shadow-2xl border-l border-slate-200 flex flex-col animate-in slide-in-from-right duration-200">
       
-      {/* Drawer Header */}
       <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-brand-700 to-brand-600 text-white">
         <div className="flex items-center space-x-2.5">
           <div className="w-8 h-8 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
@@ -86,7 +85,6 @@ export default function AIAssistantDrawer({ isOpen, onClose, student }) {
         </button>
       </div>
 
-      {/* Messages Body */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
         {messages.map((msg, idx) => (
           <div
@@ -106,7 +104,6 @@ export default function AIAssistantDrawer({ isOpen, onClose, student }) {
                   : 'bg-slate-100 text-slate-800 rounded-bl-none border border-slate-200/60 shadow-sm'
               }`}
             >
-              {/* Message Content */}
               {msg.role === 'assistant' ? (
                 <div className="text-slate-800 space-y-1.5 leading-relaxed">
                   <ReactMarkdown
@@ -139,7 +136,6 @@ export default function AIAssistantDrawer({ isOpen, onClose, student }) {
                 <div className="whitespace-pre-wrap text-xs">{msg.content}</div>
               )}
 
-              {/* Citations */}
               {msg.citations && msg.citations.length > 0 && (
                 <div className="mt-3 pt-2.5 border-t border-slate-200/80 text-[11px]">
                   <span className="font-semibold text-slate-500 block mb-1">Official Sources:</span>
@@ -180,7 +176,6 @@ export default function AIAssistantDrawer({ isOpen, onClose, student }) {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Suggested Starter Chips */}
       {messages.length <= 2 && (
         <div className="px-4 py-2 border-t border-slate-100 bg-slate-50">
           <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
@@ -200,7 +195,6 @@ export default function AIAssistantDrawer({ isOpen, onClose, student }) {
         </div>
       )}
 
-      {/* Input Footer */}
       <div className="p-3 border-t border-slate-200 bg-white">
         <form
           onSubmit={(e) => {

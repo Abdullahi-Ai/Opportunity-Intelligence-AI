@@ -4,7 +4,7 @@ import { api, setToken } from '../api/client';
 
 export default function AuthModal({ isOpen, onClose, user, onAuthSuccess, onLogout }) {
   const [isRegister, setIsRegister] = useState(false);
-  const [role, setRole] = useState('student'); // 'student' or 'admin'
+  const [role, setRole] = useState('student');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
@@ -55,7 +55,6 @@ export default function AuthModal({ isOpen, onClose, user, onAuthSuccess, onLogo
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="relative bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-100 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         
-        {/* Header */}
         <div className="p-6 bg-gradient-to-r from-brand-700 to-brand-600 text-white flex justify-between items-center">
           <div className="flex items-center space-x-2.5">
             <div className="w-9 h-9 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
@@ -75,10 +74,8 @@ export default function AuthModal({ isOpen, onClose, user, onAuthSuccess, onLogo
           </button>
         </div>
 
-        {/* Content */}
         <div className="p-6">
           {user ? (
-            /* Authenticated User Profile Summary & Logout */
             <div className="space-y-4">
               <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2">
                 <div className="flex justify-between items-center">
@@ -113,7 +110,6 @@ export default function AuthModal({ isOpen, onClose, user, onAuthSuccess, onLogo
               </button>
             </div>
           ) : (
-            /* Login & Registration Form */
             <form onSubmit={handleSubmit} className="space-y-4">
               {error && (
                 <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs">
@@ -123,7 +119,6 @@ export default function AuthModal({ isOpen, onClose, user, onAuthSuccess, onLogo
 
               {isRegister && (
                 <>
-                  {/* Role Selector */}
                   <div className="flex rounded-xl bg-slate-100 p-1 text-xs font-semibold">
                     <button
                       type="button"

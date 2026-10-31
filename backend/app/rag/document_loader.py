@@ -51,7 +51,6 @@ def parse_markdown_with_frontmatter(file_path: Path) -> RawOpportunityDocument:
     raw_yaml, raw_body = frontmatter_match.group(1), frontmatter_match.group(2)
     meta = yaml.safe_load(raw_yaml)
 
-    # Normalize fields
     fields_of_study = meta.get("field_of_study", [])
     if isinstance(fields_of_study, str):
         fields_of_study = [fields_of_study]
@@ -60,7 +59,6 @@ def parse_markdown_with_frontmatter(file_path: Path) -> RawOpportunityDocument:
     if isinstance(degree_levels, str):
         degree_levels = [degree_levels]
 
-    # Split body into sections by markdown header (### or ##)
     section_pattern = re.compile(r"^(#{2,3})\s+(.+)$", re.MULTILINE)
     matches = list(section_pattern.finditer(raw_body))
     
@@ -102,7 +100,6 @@ def chunk_opportunity_document(doc: RawOpportunityDocument) -> List[OpportunityC
     chunks: List[OpportunityChunk] = []
 
     for section_idx, (section_title, section_text) in enumerate(doc.sections.items()):
-        # Build enriched chunk content including contextual title & provider header
         enriched_content = (
             f"Opportunity: {doc.title} ({doc.provider})\n"
             f"Category: {doc.category} | Deadline: {doc.application_deadline}\n"

@@ -94,5 +94,22 @@ TOOLS_SPEC: List[Dict[str, Any]] = [
                 "required": ["opportunity_id"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_tracked_applications",
+            "description": "Retrieves the student's currently tracked and saved applications and checklist progress. Requires authenticated student session.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "student_profile_id": {
+                        "type": "string",
+                        "description": "Optional student profile ID."
+                    }
+                },
+                "required": []
+            }
+        }
     }
 ]

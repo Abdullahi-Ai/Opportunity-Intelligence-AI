@@ -28,7 +28,6 @@ def test_deadline_countdown_invalid():
     assert result["status"] == "error"
 
 def test_assess_eligibility_safaricom_attachment():
-    # 3rd year Computer Science student should meet criteria
     payload = AssessEligibilityInput(
         opportunity_id="opp-safaricom-attachment-2026",
         student_degree_level="Undergraduate",
@@ -41,7 +40,6 @@ def test_assess_eligibility_safaricom_attachment():
     assert result["official_url"] == "https://www.safaricom.co.ke/careers"
 
 def test_assess_eligibility_ineligible_year():
-    # 1st year student seeking industrial attachment should not meet year criteria
     payload = AssessEligibilityInput(
         opportunity_id="opp-safaricom-attachment-2026",
         student_degree_level="Undergraduate",
@@ -57,6 +55,5 @@ def test_generate_application_checklist():
     result = tool_generate_application_checklist(payload)
     assert result["status"] == "success"
     assert len(result["tasks"]) > 0
-    # Must contain key HEF document tasks
     task_texts = " ".join([t["task"] for t in result["tasks"]])
     assert "KRA PIN" in task_texts or "KCSE" in task_texts or "National ID" in task_texts

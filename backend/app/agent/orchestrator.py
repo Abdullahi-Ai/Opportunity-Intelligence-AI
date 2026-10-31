@@ -8,7 +8,7 @@ import os
 import re
 import json
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 from sqlalchemy.orm import Session
 
@@ -20,9 +20,12 @@ from app.agent.memory import (
     load_conversation_state,
     save_conversation_state,
     record_turn,
-    update_structured_summary
+    update_structured_summary,
+    load_message_history
 )
 from app.models.entities import Conversation
+from app.agent.prompts import AGENT_SYSTEM_PROMPT, build_student_context_prompt
+from app.agent.schemas import TOOLS_SPEC
 from app.agent.tools import (
     SearchOpportunitiesInput,
     tool_search_opportunities,
@@ -31,16 +34,17 @@ from app.agent.tools import (
     AssessEligibilityInput,
     tool_assess_eligibility,
     GenerateChecklistInput,
-    tool_generate_application_checklist
+    tool_generate_application_checklist,
+    execute_registered_tool,
+    TOOL_REGISTRY
 )
 
 logger = logging.getLogger(__name__)
 
-# Minimum semantic similarity threshold required to consider a RAG chunk relevant
 MIN_RAG_SIMILARITY_THRESHOLD = 0.15
 
-# In-memory session fallback cache for non-database test mocks
 SESSION_CONTEXT_CACHE: Dict[str, List[Dict[str, Any]]] = {}
+SESSION_STATE_CACHE: Dict[str, ConversationState] = {}
 MAX_SESSION_HISTORY_TURNS = 10
 
 def extract_clean_content_body(raw_chunk_text: str) -> str:
@@ -60,18 +64,18 @@ def extract_clean_content_body(raw_chunk_text: str) -> str:
     clean_text = re.sub(r"\s+", " ", clean_text).strip()
     return clean_text
 
-# Dispatch map for deterministic tool execution
-TOOL_DISPATCH_MAP = {
-    "search_opportunities": lambda args: tool_search_opportunities(SearchOpportunitiesInput(**args)),
-    "calculate_deadline_countdown": lambda args: tool_calculate_deadline_countdown(DeadlineCountdownInput(**args)),
-    "assess_eligibility": lambda args: tool_assess_eligibility(AssessEligibilityInput(**args)),
-    "generate_application_checklist": lambda args: tool_generate_application_checklist(GenerateChecklistInput(**args)),
-}
-
 class AgentOrchestrator:
-    def __init__(self, api_key: str = settings.GROQ_API_KEY, model: str = settings.GROQ_MODEL):
+    def __init__(
+        self,
+        api_key: str = settings.GROQ_API_KEY,
+        model: str = settings.GROQ_MODEL,
+        max_tool_iterations: int = 5,
+        timeout_seconds: float = 30.0
+    ):
         self.api_key = api_key
         self.model = model
+        self.max_tool_iterations = max_tool_iterations
+        self.timeout_seconds = timeout_seconds
         self._groq_client = None
 
     @property
@@ -79,21 +83,213 @@ class AgentOrchestrator:
         if self._groq_client is None and self.api_key and self.api_key != "your_groq_api_key_here":
             try:
                 from groq import Groq
-                self._groq_client = Groq(api_key=self.api_key)
+                self._groq_client = Groq(api_key=self.api_key, timeout=self.timeout_seconds)
             except Exception as e:
                 logger.warning(f"Failed to initialize Groq client: {e}")
         return self._groq_client
 
-    def execute_tool(self, tool_name: str, tool_args: Dict[str, Any]) -> Dict[str, Any]:
-        """Executes a tool deterministically and returns structured output."""
-        func = TOOL_DISPATCH_MAP.get(tool_name)
-        if not func:
-            return {"status": "error", "message": f"Unknown tool '{tool_name}'"}
-        try:
-            return func(tool_args)
-        except Exception as e:
-            logger.error(f"Error executing tool {tool_name} with {tool_args}: {e}")
-            return {"status": "error", "message": f"Tool execution failed: {str(e)}"}
+    @groq_client.setter
+    def groq_client(self, client):
+        self._groq_client = client
+
+    def execute_tool(
+        self,
+        tool_name: str,
+        tool_args: Dict[str, Any],
+        authenticated_student_id: Optional[str] = None,
+        db: Optional[Session] = None
+    ) -> Dict[str, Any]:
+        """Executes a registered tool deterministically and returns structured output."""
+        return execute_registered_tool(
+            tool_name=tool_name,
+            tool_args=tool_args,
+            authenticated_student_id=authenticated_student_id,
+            db=db
+        )
+
+    def _generate_suggested_followups(self, intent: IntentType, state: ConversationState) -> List[str]:
+        followups = []
+        if state.discussed_opportunities:
+            latest = state.discussed_opportunities[-1].get("title", "this opportunity")
+            followups.append(f"Am I eligible for {latest}?")
+            followups.append(f"What documents do I need for {latest}?")
+            followups.append(f"When is the application deadline for {latest}?")
+        else:
+            followups.append("Show me scholarships in Kenya")
+            followups.append("Find industrial attachments for computer science")
+            followups.append("Check my eligibility for Safaricom attachment")
+        return followups[:3]
+
+    def _run_llm_tool_loop(
+        self,
+        message: str,
+        intent: IntentType,
+        intent_meta: Dict[str, Any],
+        state: ConversationState,
+        conversation_id: str,
+        authenticated_student_id: Optional[str] = None,
+        db: Optional[Session] = None
+    ) -> Tuple[str, List[Dict[str, Any]], List[Dict[str, str]]]:
+        """Executes genuine LLM-driven tool calling with evidence grounding."""
+        system_content = AGENT_SYSTEM_PROMPT.strip()
+        student_profile_text = build_student_context_prompt(state.student_memory)
+        if student_profile_text:
+            system_content += "\n\n" + student_profile_text.strip()
+
+        now_dt = datetime.now()
+        system_content += (
+            f"\n\n### TEMPORAL ANCHOR & SYSTEM CONTEXT:\n"
+            f"- Current Date: {now_dt.strftime('%Y-%m-%d')} ({now_dt.strftime('%A')})\n"
+            f"- Academic Calendar: Kenyan University Academic Year 2026/2027\n"
+        )
+        if state.discussed_opportunities:
+            recent_titles = [f"'{o.get('title')}' (id: {o.get('id')})" for o in state.discussed_opportunities[-4:]]
+            system_content += f"- Recently Discussed Opportunities in this Session: {', '.join(recent_titles)}\n"
+
+        if state.summary:
+            system_content += f"- Conversation Summary so far: {state.summary}\n"
+
+        messages: List[Dict[str, Any]] = [
+            {"role": "system", "content": system_content}
+        ]
+
+        history: List[Dict[str, str]] = []
+        if conversation_id in SESSION_CONTEXT_CACHE:
+            history = SESSION_CONTEXT_CACHE[conversation_id][-6:]
+        elif db:
+            db_history = load_message_history(db, conversation_id)
+            for m in db_history[-6:]:
+                history.append({"role": m.get("role", "user"), "content": m.get("content", "")})
+
+        for h in history:
+            if h.get("content"):
+                messages.append({"role": h.get("role", "user"), "content": h.get("content")})
+
+        messages.append({"role": "user", "content": message})
+
+        tool_calls_executed: List[Dict[str, Any]] = []
+        citations: List[Dict[str, str]] = []
+        seen_urls = set()
+
+        iteration = 0
+        final_reply = ""
+
+        while iteration < self.max_tool_iterations:
+            iteration += 1
+
+            response = self.groq_client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                tools=TOOLS_SPEC,
+                tool_choice="auto",
+                temperature=0.1,
+                max_tokens=1500
+            )
+
+            choice = response.choices[0]
+            choice_message = choice.message
+            raw_tool_calls = getattr(choice_message, "tool_calls", None)
+
+            if raw_tool_calls:
+                asst_msg_dict: Dict[str, Any] = {
+                    "role": "assistant",
+                    "content": choice_message.content or "",
+                    "tool_calls": []
+                }
+                for tc in raw_tool_calls:
+                    tc_fn = getattr(tc, "function", None)
+                    tc_name = getattr(tc_fn, "name", "")
+                    tc_args_str = getattr(tc_fn, "arguments", "{}")
+                    asst_msg_dict["tool_calls"].append({
+                        "id": getattr(tc, "id", f"call_{iteration}"),
+                        "type": "function",
+                        "function": {
+                            "name": tc_name,
+                            "arguments": tc_args_str if isinstance(tc_args_str, str) else json.dumps(tc_args_str)
+                        }
+                    })
+                messages.append(asst_msg_dict)
+
+                for tc in raw_tool_calls:
+                    tc_id = getattr(tc, "id", f"call_{iteration}")
+                    tc_fn = getattr(tc, "function", None)
+                    fn_name = getattr(tc_fn, "name", "")
+                    raw_args = getattr(tc_fn, "arguments", {})
+
+                    if isinstance(raw_args, str):
+                        try:
+                            fn_args = json.loads(raw_args)
+                        except Exception:
+                            fn_args = {}
+                    else:
+                        fn_args = raw_args or {}
+
+                    tool_output = self.execute_tool(
+                        tool_name=fn_name,
+                        tool_args=fn_args,
+                        authenticated_student_id=authenticated_student_id,
+                        db=db
+                    )
+
+                    tool_calls_executed.append({
+                        "tool": fn_name,
+                        "args": fn_args,
+                        "status": tool_output.get("status", "success")
+                    })
+
+                    if fn_name in ["search_opportunities", "tool_search_opportunities"]:
+                        for r in tool_output.get("results", []):
+                            u = r.get("official_url")
+                            t = r.get("title")
+                            if u and u not in seen_urls:
+                                seen_urls.add(u)
+                                citations.append({"title": t or "Official Portal", "url": u})
+                            if r.get("opportunity_id"):
+                                state.discussed_opportunities.append({
+                                    "id": r.get("opportunity_id"),
+                                    "title": t,
+                                    "provider": r.get("provider"),
+                                    "deadline": r.get("published_deadline") or r.get("deadline"),
+                                    "official_url": u
+                                })
+                    elif fn_name in ["assess_eligibility", "tool_assess_eligibility"]:
+                        u = tool_output.get("official_url")
+                        t = tool_output.get("title")
+                        if u and u not in seen_urls:
+                            seen_urls.add(u)
+                            citations.append({"title": t or "Official Portal", "url": u})
+                    elif fn_name in ["generate_application_checklist", "tool_generate_application_checklist"]:
+                        u = tool_output.get("official_url")
+                        t = tool_output.get("title")
+                        if u and u not in seen_urls:
+                            seen_urls.add(u)
+                            citations.append({"title": t or "Official Portal", "url": u})
+
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc_id,
+                        "name": fn_name,
+                        "content": json.dumps(tool_output)
+                    })
+            else:
+                final_reply = choice_message.content or ""
+                break
+
+        if not final_reply and iteration >= self.max_tool_iterations:
+            logger.warning("Reached maximum tool call iterations (%d). Forcing final synthesis.", self.max_tool_iterations)
+            try:
+                forced_response = self.groq_client.chat.completions.create(
+                    model=self.model,
+                    messages=messages + [{"role": "user", "content": "Please synthesize your final grounded answer based strictly on the tool evidence gathered above."}],
+                    temperature=0.1,
+                    max_tokens=1500
+                )
+                final_reply = forced_response.choices[0].message.content or ""
+            except Exception as e:
+                logger.error(f"Failed forced synthesis after tool iterations: {e}")
+                final_reply = "I retrieved the relevant records from the verified directory above, but could not finalize the response. Please refer to the verified links provided."
+
+        return final_reply, tool_calls_executed, citations
 
     def _handle_ambiguous_intent(self, message: str, intent_meta: Dict[str, Any], state: ConversationState) -> Dict[str, Any]:
         """Handles ambiguous or single-word requests by asking helpful clarification questions."""
@@ -175,12 +371,10 @@ class AgentOrchestrator:
                 if len(unique_opps) >= 4:
                     break
 
-        # Fallback if search returned fewer than expected
         if not unique_opps:
             search_res = tool_search_opportunities(SearchOpportunitiesInput(query="Kenya university opportunities", top_k=4))
             unique_opps = search_res.get("results", [])
 
-        # Save to discussed_opportunities memory
         state.discussed_opportunities = [
             {
                 "id": opp.get("opportunity_id"),
@@ -501,86 +695,18 @@ class AgentOrchestrator:
             "intent": IntentType.PREFERENCE_UPDATE.value
         }
 
-    def process_turn(
+    def _fallback_deterministic_turn(
         self,
         message: str,
-        conversation_id: str,
-        db: Optional[Session] = None,
-        user_id: Optional[str] = None,
-        session_id: Optional[str] = None,
-        student_profile: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        """Executes a controlled, verified conversational turn following the 17-step pipeline."""
-        conversation = None
-        state = None
-        if db:
-            conversation = get_or_create_conversation(
-                db=db,
-                conversation_id=conversation_id,
-                user_id=user_id,
-                anonymous_session_id=session_id
-            )
-            state = load_conversation_state(db, conversation)
-        else:
-            state = ConversationState(conversation_id=conversation_id, user_id=user_id, anonymous_session_id=session_id)
-
-        # Merge student profile into memory if present
-        if student_profile:
-            for k, v in student_profile.items():
-                if v and k not in state.student_memory:
-                    state.student_memory[k] = v
-
-        state.turn_count += 1
-
-        # Step 3: Classify Intent
-        intent, intent_meta = classify_intent(
-            message=message,
-            pending_question=state.pending_question,
-            recently_discussed=state.discussed_opportunities
-        )
-        logger.info(f"Classified intent: {intent.value} for query: '{message}'")
-
-        if intent_meta.get("resolved_from_pending"):
-            state.pending_question = None
-            if intent_meta.get("context", {}).get("destination_preference"):
-                state.student_memory["destination"] = intent_meta["context"]["destination_preference"]
-
-        # Persist newly mentioned student attributes into conversational memory
-        entities = intent_meta.get("entities", {})
-        if entities.get("university"):
-            state.student_memory["university"] = entities["university"]
-        if entities.get("year_of_study"):
-            state.student_memory["year_of_study"] = entities["year_of_study"]
-        if entities.get("field_of_study"):
-            state.student_memory["field_of_study"] = entities["field_of_study"]
-        if entities.get("degree_level"):
-            state.student_memory["degree_level"] = entities["degree_level"]
-
-        tool_calls_executed = []
-        citations = []
+        intent: IntentType,
+        intent_meta: Dict[str, Any],
+        state: ConversationState
+    ) -> Tuple[str, List[Dict[str, Any]], List[Dict[str, str]]]:
+        tool_calls_executed: List[Dict[str, Any]] = []
+        citations: List[Dict[str, str]] = []
         final_reply = ""
 
-        # Step 4: Route Intent to Specific Handlers
-        if intent == IntentType.THANK_YOU:
-            final_reply = (
-                "You're very welcome! 😊 Feel free to ask anytime if you want to discover more verified opportunities, "
-                "check your eligibility, review deadlines, or generate application checklists. Best of luck with your academic journey!"
-            )
-            state.pending_question = None
-
-        elif intent == IntentType.GREETING_SOCIAL:
-            final_reply = (
-                "Hello! 👋 I am your **Opportunity Intelligence AI** advisor for university students in Kenya.\n\n"
-                "I can help you:\n"
-                "- 🔍 **Find verified opportunities**: Discover official scholarships (e.g. HEF, Equity ELP, Chevening), attachments (e.g. Safaricom, KRA), and competitions.\n"
-                "- 📋 **Assess eligibility**: Check if your course, year of study, and grade meet published criteria.\n"
-                "- ⏰ **Track deadlines**: View deterministic countdowns calculated directly from official dates.\n"
-                "- 📝 **Application checklists**: Generate step-by-step document lists and submission instructions.\n\n"
-                "How can I assist you with your academic or career goals today?"
-            )
-            state.pending_question = None
-
-        elif intent == IntentType.OPPORTUNITY_DISCOVERY:
+        if intent == IntentType.OPPORTUNITY_DISCOVERY:
             res = self._handle_opportunity_discovery(message, state)
             final_reply = res["response"]
             tool_calls_executed.extend(res["tool_calls"])
@@ -611,14 +737,6 @@ class AgentOrchestrator:
         elif intent == IntentType.PREFERENCE_UPDATE:
             res = self._handle_preference_update(message, intent_meta, state)
             final_reply = res["response"]
-
-        elif intent == IntentType.OUT_OF_SCOPE:
-            final_reply = (
-                "I could not find verified records for that inquiry because I specialize specifically in verified educational and early-career opportunities for university students in Kenya "
-                "(such as scholarships, industrial attachments, trainee schemes, and competitions).\n\n"
-                "I cannot assist with out-of-scope inquiries. Would you like to explore verified scholarships, attachment programmes, or check your eligibility for Kenyan institutions?"
-            )
-            state.pending_question = None
 
         elif intent == IntentType.CHECKLIST_GENERATION:
             target_id = intent_meta.get("entities", {}).get("opportunity_id")
@@ -776,7 +894,6 @@ class AgentOrchestrator:
                     final_reply = "I could not find verified records for that deadline. Please check the official provider portal directly to avoid missing dates."
 
         else:
-            # Scholarship Search, Internship Search, Graduate Trainee, Field Search
             category_filter = None
             if intent == IntentType.SCHOLARSHIP_SEARCH:
                 category_filter = "Scholarship"
@@ -802,7 +919,6 @@ class AgentOrchestrator:
             raw_results = search_res.get("results", [])
             valid_results = [r for r in raw_results if r.get("similarity_score", 0.0) >= MIN_RAG_SIMILARITY_THRESHOLD]
 
-            # If category filter yielded 0 results, retry without category constraint
             if not valid_results and category_filter:
                 retry_res = tool_search_opportunities(SearchOpportunitiesInput(query=enriched_query, top_k=4))
                 valid_results = [r for r in retry_res.get("results", []) if r.get("similarity_score", 0.0) >= MIN_RAG_SIMILARITY_THRESHOLD]
@@ -884,14 +1000,147 @@ class AgentOrchestrator:
                     "context": {"opportunities": [o["title"] for o in state.discussed_opportunities]}
                 }
 
-        # Step 5: Update in-memory session context for backward-compatibility
+        return final_reply, tool_calls_executed, citations
+
+    def process_turn(
+        self,
+        message: str,
+        conversation_id: str,
+        db: Optional[Session] = None,
+        user_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        student_profile: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Executes a controlled, verified conversational turn following the 17-step pipeline."""
+        conversation = None
+        state = None
+        if db:
+            conversation = get_or_create_conversation(
+                db=db,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                anonymous_session_id=session_id
+            )
+            state = load_conversation_state(db, conversation)
+        else:
+            if conversation_id in SESSION_STATE_CACHE:
+                state = SESSION_STATE_CACHE[conversation_id]
+            else:
+                state = ConversationState(conversation_id=conversation_id, user_id=user_id, anonymous_session_id=session_id)
+                SESSION_STATE_CACHE[conversation_id] = state
+
+        if student_profile:
+            for k, v in student_profile.items():
+                if v and k not in state.student_memory:
+                    state.student_memory[k] = v
+
+        state.turn_count += 1
+
+        intent, intent_meta = classify_intent(
+            message=message,
+            pending_question=state.pending_question,
+            recently_discussed=state.discussed_opportunities
+        )
+        logger.info(f"Classified intent: {intent.value} for query: '{message}'")
+
+        if intent_meta.get("resolved_from_pending"):
+            state.pending_question = None
+            if intent_meta.get("context", {}).get("destination_preference"):
+                state.student_memory["destination"] = intent_meta["context"]["destination_preference"]
+
+        entities = intent_meta.get("entities", {})
+        if entities.get("university"):
+            state.student_memory["university"] = entities["university"]
+        if entities.get("year_of_study"):
+            state.student_memory["year_of_study"] = entities["year_of_study"]
+        if entities.get("field_of_study"):
+            state.student_memory["field_of_study"] = entities["field_of_study"]
+        if entities.get("degree_level"):
+            state.student_memory["degree_level"] = entities["degree_level"]
+
+        authenticated_student_id = None
+        if student_profile and student_profile.get("id"):
+            authenticated_student_id = student_profile.get("id")
+        elif user_id and db:
+            from app.models.entities import StudentProfile
+            sp = db.query(StudentProfile).filter(StudentProfile.user_id == user_id).first()
+            if sp:
+                authenticated_student_id = sp.id
+
+        tool_calls_executed = []
+        citations = []
+        final_reply = ""
+
+        if intent == IntentType.THANK_YOU:
+            final_reply = (
+                "You're very welcome! 😊 Feel free to ask anytime if you want to discover more verified opportunities, "
+                "check your eligibility, review deadlines, or generate application checklists. Best of luck with your academic journey!"
+            )
+            state.pending_question = None
+
+        elif intent == IntentType.GREETING_SOCIAL:
+            final_reply = (
+                "Hello! 👋 I am your **Opportunity Intelligence AI** advisor for university students in Kenya.\n\n"
+                "I can help you:\n"
+                "- 🔍 **Find verified opportunities**: Discover official scholarships (e.g. HEF, Equity ELP, Chevening), attachments (e.g. Safaricom, KRA), and competitions.\n"
+                "- 📋 **Assess eligibility**: Check if your course, year of study, and grade meet published criteria.\n"
+                "- ⏰ **Track deadlines**: View deterministic countdowns calculated directly from official dates.\n"
+                "- 📝 **Application checklists**: Generate step-by-step document lists and submission instructions.\n\n"
+                "How can I assist you with your academic or career goals today?"
+            )
+            state.pending_question = None
+
+        elif intent == IntentType.OUT_OF_SCOPE:
+            final_reply = (
+                "I could not find verified records for that inquiry because I specialize specifically in verified educational and early-career opportunities for university students in Kenya "
+                "(such as scholarships, industrial attachments, trainee schemes, and competitions).\n\n"
+                "I cannot assist with out-of-scope inquiries. Would you like to explore verified scholarships, attachment programmes, or check your eligibility for Kenyan institutions?"
+            )
+            state.pending_question = None
+
+        else:
+            used_llm = False
+            if self.groq_client is not None:
+                try:
+                    final_reply, tool_calls_executed, citations = self._run_llm_tool_loop(
+                        message=message,
+                        intent=intent,
+                        intent_meta=intent_meta,
+                        state=state,
+                        conversation_id=conversation_id,
+                        authenticated_student_id=authenticated_student_id,
+                        db=db
+                    )
+                    used_llm = True
+                except Exception as e:
+                    logger.warning(
+                        "Groq LLM tool execution failed (%s: %s). Falling back to deterministic pipeline.",
+                        type(e).__name__,
+                        str(e)
+                    )
+
+            if not used_llm:
+                final_reply, tool_calls_executed, citations = self._fallback_deterministic_turn(
+                    message=message,
+                    intent=intent,
+                    intent_meta=intent_meta,
+                    state=state
+                )
+
+        if final_reply:
+            md_links = re.findall(r'\[([^\]]+)\]\((https?://[^\)]+)\)', final_reply)
+            existing_urls = {c["url"] for c in citations}
+            for link_text, link_url in md_links:
+                if link_url not in existing_urls:
+                    existing_urls.add(link_url)
+                    citations.append({"title": link_text, "url": link_url})
+
         if conversation_id not in SESSION_CONTEXT_CACHE:
             SESSION_CONTEXT_CACHE[conversation_id] = []
         SESSION_CONTEXT_CACHE[conversation_id].append({"role": "user", "content": message})
         SESSION_CONTEXT_CACHE[conversation_id].append({"role": "assistant", "content": final_reply})
         SESSION_CONTEXT_CACHE[conversation_id] = SESSION_CONTEXT_CACHE[conversation_id][-MAX_SESSION_HISTORY_TURNS:]
 
-        # Step 6: Persist in Database
         if db and conversation:
             record_turn(
                 db=db,
@@ -910,6 +1159,8 @@ class AgentOrchestrator:
 
             update_structured_summary(state, message, final_reply)
             save_conversation_state(db, conversation, state)
+        else:
+            SESSION_STATE_CACHE[conversation_id] = state
 
         return {
             "response": final_reply,
@@ -918,7 +1169,9 @@ class AgentOrchestrator:
             "grounded": True,
             "intent": intent.value,
             "conversation_id": conversation_id,
-            "state": state.to_dict()
+            "session_id": session_id or conversation_id,
+            "state": state.to_dict(),
+            "suggested_follow_ups": self._generate_suggested_followups(intent, state)
         }
 
     def chat(
@@ -938,5 +1191,4 @@ class AgentOrchestrator:
             student_profile=student_profile
         )
 
-# Singleton orchestrator instance
 agent_orchestrator = AgentOrchestrator()

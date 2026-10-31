@@ -77,11 +77,9 @@ def run_ingestion(raw_dir: str = settings.RAW_DATA_DIRECTORY) -> Dict[str, Any]:
         logger.warning(f"Raw opportunities directory {raw_path} does not exist.")
         return {"status": "error", "message": f"Directory {raw_path} not found"}
 
-    # 1. Sync relational DB
     relational_synced = sync_relational_opportunities(raw_path)
     logger.info(f"Synchronized {relational_synced} master records into relational database.")
 
-    # 2. Extract and chunk for ChromaDB
     all_chunks = []
     for file_path in sorted(raw_path.glob("*.md")):
         doc = parse_markdown_with_frontmatter(file_path)

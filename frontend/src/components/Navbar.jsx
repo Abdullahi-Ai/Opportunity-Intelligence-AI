@@ -16,7 +16,6 @@ export default function Navbar({
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-16 items-center">
           
-          {/* Logo & Brand */}
           <div className="flex items-center space-x-3 cursor-pointer" onClick={() => setActiveTab('discover')}>
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-700 to-brand-500 flex items-center justify-center text-white shadow-md shadow-brand-500/20">
               <Compass className="w-6 h-6 animate-pulse" />
@@ -30,7 +29,6 @@ export default function Navbar({
             </div>
           </div>
 
-          {/* Navigation Links */}
           <nav className="flex items-center space-x-1 sm:space-x-2">
             <button
               onClick={() => setActiveTab('discover')}
@@ -75,7 +73,6 @@ export default function Navbar({
             </button>
           </nav>
 
-          {/* Account & Profile Control */}
           <div className="flex items-center pl-2 space-x-2">
             {user ? (
               <button

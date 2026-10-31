@@ -14,24 +14,20 @@ import AdminPortalModal from './components/AdminPortalModal';
 import AIAssistantDrawer from './components/AIAssistantDrawer';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'explore' | 'ai-workspace' | 'tracker' | 'eligibility'
+  const [activeTab, setActiveTab] = useState('dashboard');
   
-  // Data State
   const [opportunities, setOpportunities] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   
-  // Filter State
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [isOpenOnly, setIsOpenOnly] = useState(false);
 
-  // Authenticated User & Profile State
   const [user, setUser] = useState(null);
   const [student, setStudent] = useState(null);
   const [trackedIds, setTrackedIds] = useState(new Set());
 
-  // Modals & Drawers
   const [selectedOpportunity, setSelectedOpportunity] = useState(null);
   const [eligibilityOpportunity, setEligibilityOpportunity] = useState(null);
   const [isAssistantOpen, setIsAssistantOpen] = useState(false);
@@ -39,7 +35,6 @@ export default function App() {
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
 
-  // Restore authenticated session on mount
   useEffect(() => {
     const initAuth = async () => {
       const token = getToken();
@@ -88,7 +83,6 @@ export default function App() {
     setTrackedIds(new Set());
   };
 
-  // Load Opportunities
   const loadOpportunities = async () => {
     setLoading(true);
     setError(null);
@@ -106,7 +100,6 @@ export default function App() {
     }
   };
 
-  // Sync Student Tracked IDs
   const syncTrackedIds = async () => {
     if (!student?.id) return;
     try {
@@ -150,7 +143,6 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#F8FAFC] flex font-['Inter',sans-serif] text-slate-800">
       
-      {/* 1. Left Modern Sidebar (Inspired by Reference 1 & 3) */}
       <Sidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -161,10 +153,8 @@ export default function App() {
         onOpenAssistantDrawer={() => setIsAssistantOpen(true)}
       />
 
-      {/* 2. Main Content Canvas */}
       <div className="flex-1 flex flex-col min-w-0 min-h-screen">
         
-        {/* Top Header Bar (Inspired by Reference 1 & 2) */}
         <TopHeader
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
@@ -175,7 +165,6 @@ export default function App() {
           onOpenAdmin={() => setIsAdminOpen(true)}
         />
 
-        {/* Dynamic View Body */}
         <main className="flex-1 p-6 sm:p-8 max-w-7xl w-full mx-auto">
           
           {activeTab === 'dashboard' && (
@@ -256,7 +245,6 @@ export default function App() {
 
         </main>
 
-        {/* Global Footer */}
         <footer className="border-t border-slate-200/80 bg-white py-4 px-8 text-center text-xs text-slate-400">
           <p className="font-semibold text-slate-600">Opportunity Intelligence AI — Kenyan University Students Platform</p>
           <p className="text-[11px] text-slate-400 mt-0.5">
@@ -266,7 +254,6 @@ export default function App() {
 
       </div>
 
-      {/* Global Modals & Drawers */}
       <OpportunityModal
         opportunity={selectedOpportunity}
         onClose={() => setSelectedOpportunity(null)}

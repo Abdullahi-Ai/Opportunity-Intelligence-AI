@@ -32,7 +32,7 @@ class ConversationState:
         self.anonymous_session_id = anonymous_session_id
         self.title = title
         self.summary = summary or ""
-        self.pending_question = pending_question  # {"question": str, "topic": str, "context": dict}
+        self.pending_question = pending_question
         self.discussed_opportunities = discussed_opportunities or []
         self.student_memory = student_memory or {}
         self.turn_count = turn_count
@@ -71,7 +71,6 @@ def get_or_create_conversation(
     if conversation_id:
         conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
         if conv:
-            # Enforce access isolation: if authenticated, must match user_id
             if user_id and conv.user_id and conv.user_id != user_id:
                 logger.warning(f"Unauthorized conversation access attempt: user {user_id} tried accessing {conv.id}")
                 conv = None
@@ -139,7 +138,6 @@ def record_turn(
 ):
     """Persists user and assistant messages for auditability and history restoration."""
     import uuid
-    # 1. User message
     u_msg = ConversationMessage(
         id=str(uuid.uuid4()),
         conversation_id=conversation_id,
@@ -150,7 +148,6 @@ def record_turn(
     )
     db.add(u_msg)
 
-    # 2. Assistant message
     a_msg = ConversationMessage(
         id=str(uuid.uuid4()),
         conversation_id=conversation_id,

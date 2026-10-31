@@ -22,7 +22,6 @@ class VectorStore:
         self.collection_name = collection_name
         Path(self.persist_dir).mkdir(parents=True, exist_ok=True)
         
-        # Initialize persistent chroma client
         self.client = chromadb.PersistentClient(
             path=self.persist_dir,
             settings=ChromaSettings(anonymized_telemetry=False)
@@ -46,7 +45,6 @@ class VectorStore:
         documents = [chunk.content for chunk in chunks]
         metadatas = [chunk.metadata for chunk in chunks]
 
-        # ChromaDB upsert handles both insertion and updates idempotently
         self.collection.upsert(
             ids=ids,
             documents=documents,
@@ -76,7 +74,6 @@ class VectorStore:
             "n_results": min(top_k, max(1, self.collection.count()))
         }
         if where_filter:
-            # If multiple filters, use $and
             if len(where_filter) > 1:
                 kwargs["where"] = {"$and": [{k: v} for k, v in where_filter.items()]}
             else:
@@ -95,7 +92,6 @@ class VectorStore:
                 chunk_id = results["ids"][0][i] if results["ids"] else ""
                 distance = results["distances"][0][i] if results.get("distances") else 0.0
 
-                # Cosine distance to similarity score conversion
                 similarity_score = max(0.0, 1.0 - (distance / 2.0))
 
                 formatted_results.append({
@@ -125,5 +121,4 @@ class VectorStore:
             metadata={"description": "Verified Kenya educational and career opportunities"}
         )
 
-# Module-level vector store singleton
 vector_store = VectorStore()

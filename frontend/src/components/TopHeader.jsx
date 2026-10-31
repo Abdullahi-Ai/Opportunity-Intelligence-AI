@@ -13,7 +13,6 @@ export default function TopHeader({
   return (
     <header className="h-16 bg-white border-b border-slate-200/80 px-6 flex items-center justify-between sticky top-0 z-20 shadow-[0_1px_3px_rgba(0,0,0,0.02)]">
       
-      {/* Search Input Bar (Inspired by Reference 1 & 2) */}
       <form onSubmit={onSearch} className="relative w-72 sm:w-96">
         <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
         <input
@@ -25,15 +24,12 @@ export default function TopHeader({
         />
       </form>
 
-      {/* Right Controls */}
       <div className="flex items-center space-x-3">
-        {/* Anti-Scam & Verification Status Pill */}
         <div className="hidden lg:flex items-center space-x-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200/70 text-emerald-800 text-[11px] font-semibold">
           <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
           <span>Verified Official Sources Only</span>
         </div>
 
-        {/* User Pill / Login Trigger */}
         {user ? (
           <div className="flex items-center space-x-2">
             {user.role === 'admin' && (

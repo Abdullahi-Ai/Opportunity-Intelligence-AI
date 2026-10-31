@@ -42,7 +42,6 @@ export default function EligibilityChecker({ opportunity, student, onClose, onSa
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-white rounded-3xl max-w-xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-slate-100 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         
-        {/* Header */}
         <div className="p-6 border-b border-slate-100 flex items-start justify-between bg-gradient-to-r from-amber-500/10 via-brand-500/5 to-white">
           <div>
             <div className="flex items-center space-x-2 text-xs font-semibold text-amber-700 mb-1">
@@ -57,10 +56,8 @@ export default function EligibilityChecker({ opportunity, student, onClose, onSa
           </button>
         </div>
 
-        {/* Content Body */}
         <div className="p-6 overflow-y-auto space-y-5 text-xs text-slate-700">
           
-          {/* Profile Inputs Accordion / Grid */}
           <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-3">
             <span className="font-bold text-[11px] uppercase tracking-wider text-slate-400 block">
               Evaluated Against Your Attributes:
@@ -118,7 +115,6 @@ export default function EligibilityChecker({ opportunity, student, onClose, onSa
             </div>
           </div>
 
-          {/* Loading indicator */}
           {loading && (
             <div className="py-6 text-center text-slate-500 space-y-2">
               <RefreshCw className="w-6 h-6 animate-spin mx-auto text-brand-600" />
@@ -126,11 +122,9 @@ export default function EligibilityChecker({ opportunity, student, onClose, onSa
             </div>
           )}
 
-          {/* Assessment Result */}
           {result && !loading && (
             <div className="space-y-4">
               
-              {/* Overall Assessment Banner */}
               <div
                 className={`p-4 rounded-2xl border flex items-start space-x-3 ${
                   result.overall_assessment.includes('Likely Eligible')
@@ -155,7 +149,6 @@ export default function EligibilityChecker({ opportunity, student, onClose, onSa
                 </div>
               </div>
 
-              {/* Criteria Breakdown Table */}
               <div>
                 <h4 className="font-bold text-xs uppercase tracking-wider text-slate-400 mb-2">
                   Criterion-by-Criterion Verification:
@@ -198,7 +191,6 @@ export default function EligibilityChecker({ opportunity, student, onClose, onSa
 
         </div>
 
-        {/* Footer */}
         <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
           <button
             onClick={onClose}

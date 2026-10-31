@@ -8,7 +8,6 @@ export default function OpportunityModal({ opportunity, onClose, onCheckEligibil
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-white rounded-3xl max-w-2xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-slate-100 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         
-        {/* Header */}
         <div className="p-6 border-b border-slate-100 flex items-start justify-between bg-gradient-to-b from-brand-50/50 to-white">
           <div>
             <div className="flex items-center space-x-2 mb-2">
@@ -34,10 +33,8 @@ export default function OpportunityModal({ opportunity, onClose, onCheckEligibil
           </button>
         </div>
 
-        {/* Content Body */}
         <div className="p-6 overflow-y-auto space-y-5 text-sm text-slate-700">
           
-          {/* Key Details Card */}
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-100 text-xs">
             <div>
               <span className="text-slate-400 block font-medium">Application Deadline</span>
@@ -56,7 +53,6 @@ export default function OpportunityModal({ opportunity, onClose, onCheckEligibil
             </div>
           </div>
 
-          {/* Target Audience */}
           {opportunity.target_audience && (
             <div>
               <h4 className="font-bold text-xs uppercase tracking-wider text-slate-400 mb-1.5">Target Audience</h4>
@@ -66,7 +62,6 @@ export default function OpportunityModal({ opportunity, onClose, onCheckEligibil
             </div>
           )}
 
-          {/* Fields of Study */}
           {opportunity.fields_of_study && (
             <div>
               <h4 className="font-bold text-xs uppercase tracking-wider text-slate-400 mb-1.5">Eligible Fields of Study</h4>
@@ -76,21 +71,18 @@ export default function OpportunityModal({ opportunity, onClose, onCheckEligibil
             </div>
           )}
 
-          {/* Source Notes */}
           {opportunity.source_notes && (
             <div className="p-3 bg-brand-50/60 rounded-xl border border-brand-100 text-xs text-brand-900 leading-relaxed">
               💡 <strong>Advisor Note:</strong> {opportunity.source_notes}
             </div>
           )}
 
-          {/* Verification Disclaimer */}
           <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-900 leading-relaxed">
             🛡️ <strong>Safety & Anti-Scam Notice:</strong> This opportunity was sourced directly from the official portal. Never pay money or "medical exam clearance fees" for any attachment, internship, or scholarship application in Kenya.
           </div>
 
         </div>
 
-        {/* Footer CTAs */}
         <div className="p-5 bg-slate-50 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center space-x-2">
             <button

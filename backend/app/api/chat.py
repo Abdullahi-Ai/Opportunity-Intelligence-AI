@@ -42,6 +42,8 @@ class ChatResponse(BaseModel):
     session_id: str
     intent: Optional[str] = None
     summary: Optional[str] = None
+    grounded: bool = True
+    suggested_follow_ups: List[str] = []
     timestamp: str
 
 class RenameConversationRequest(BaseModel):
@@ -58,13 +60,13 @@ def chat_with_assistant(
     Grounds answers in ChromaDB knowledge, evaluates eligibility,
     persists conversational context in PostgreSQL/SQLite, and returns verified citations.
     """
-    # 1. Resolve student profile
     student_profile = None
     user_id = current_user.id if current_user else None
 
     if user_id and current_user.student_profile:
         sp = current_user.student_profile
         student_profile = {
+            "id": sp.id,
             "full_name": sp.full_name,
             "university": sp.university,
             "field_of_study": sp.field_of_study,
@@ -78,6 +80,7 @@ def chat_with_assistant(
         student = db.query(StudentProfile).filter(StudentProfile.id == payload.student_id).first()
         if student:
             student_profile = {
+                "id": student.id,
                 "full_name": student.full_name,
                 "university": student.university,
                 "field_of_study": student.field_of_study,
@@ -88,7 +91,6 @@ def chat_with_assistant(
                 "preferred_categories": student.preferred_categories
             }
 
-    # 2. Resolve or create conversation
     active_session_id = payload.session_id or f"sess_{user_id or 'anon'}"
     conv = get_or_create_conversation(
         db=db,
@@ -98,7 +100,6 @@ def chat_with_assistant(
         initial_title=payload.message[:40]
     )
 
-    # 3. Process Turn through the Agent Orchestrator Pipeline
     result = agent_orchestrator.process_turn(
         message=payload.message,
         conversation_id=conv.id,
@@ -116,6 +117,8 @@ def chat_with_assistant(
         session_id=active_session_id,
         intent=result.get("intent"),
         summary=result.get("state", {}).get("summary"),
+        grounded=result.get("grounded", True),
+        suggested_follow_ups=result.get("suggested_follow_ups", []),
         timestamp=datetime.utcnow().isoformat()
     )
 
@@ -142,7 +145,6 @@ def get_conversation_history(
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found.")
 
-    # Isolation check
     if conv.user_id and user_id and conv.user_id != user_id:
         raise HTTPException(status_code=403, detail="Access denied: Cannot access another user's conversation.")
 

@@ -40,7 +40,6 @@ def test_load_all_opportunities():
     all_chunks = load_all_opportunities(raw_dir)
     assert len(all_chunks) >= 10, "Should have loaded at least 10 chunks from curated opportunities."
     
-    # Verify categories present
     categories = {c.category for c in all_chunks}
     assert "Scholarship" in categories
     assert "Internship" in categories

@@ -47,7 +47,6 @@ export default function OpportunityExplorer({
   return (
     <div className="flex flex-col lg:flex-row gap-6 animate-in fade-in duration-200">
       
-      {/* Left Filter Sidebar (Inspired directly by Reference 2 - CampusConnect) */}
       <aside className="w-full lg:w-64 bg-white rounded-3xl p-5 border border-slate-200/80 space-y-6 flex-shrink-0 h-fit">
         <div className="flex justify-between items-center pb-3 border-b border-slate-100">
           <div className="flex items-center space-x-2">
@@ -69,7 +68,6 @@ export default function OpportunityExplorer({
           )}
         </div>
 
-        {/* Opportunity Type / Category */}
         <div className="space-y-2.5">
           <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Opportunity Type</p>
           <div className="space-y-1.5">
@@ -93,7 +91,6 @@ export default function OpportunityExplorer({
           </div>
         </div>
 
-        {/* Deadline Status Filter */}
         <div className="pt-2 border-t border-slate-100 space-y-2.5">
           <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Availability</p>
           <label className="flex items-center space-x-2.5 text-xs text-slate-700 cursor-pointer">
@@ -107,7 +104,6 @@ export default function OpportunityExplorer({
           </label>
         </div>
 
-        {/* Trust & Verification info box */}
         <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80 text-[11px] text-slate-600 space-y-1">
           <div className="flex items-center space-x-1.5 font-bold text-slate-800">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
@@ -119,10 +115,8 @@ export default function OpportunityExplorer({
         </div>
       </aside>
 
-      {/* Right Column: Opportunities Grid (Styled like Reference 2) */}
       <div className="flex-1 space-y-4">
         
-        {/* Top Meta Bar */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white px-5 py-3 rounded-2xl border border-slate-200/80 text-xs">
           <span className="font-bold text-slate-700">
             Showing <span className="text-brand-600">{opportunities.length}</span> verified opportunities
@@ -134,7 +128,6 @@ export default function OpportunityExplorer({
           )}
         </div>
 
-        {/* Grid of Cards */}
         {loading ? (
           <div className="py-24 text-center text-slate-500 bg-white rounded-3xl border border-slate-200/80">
             <div className="w-8 h-8 border-2 border-brand-600 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
@@ -163,7 +156,6 @@ export default function OpportunityExplorer({
                 >
                   <div className="space-y-3">
                     
-                    {/* Header Row: Title and Category Badge (Image 2 style) */}
                     <div className="flex justify-between items-start gap-2">
                       <div className="flex-1 min-w-0">
                         <h4 
@@ -183,7 +175,6 @@ export default function OpportunityExplorer({
                       </span>
                     </div>
 
-                    {/* Attribute Pills: Location/Mode & Verified & Deadline */}
                     <div className="flex flex-wrap gap-1.5 text-[11px]">
                       <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-800 font-semibold">
                         <ShieldCheck className="w-3 h-3 text-emerald-600" />
@@ -200,7 +191,6 @@ export default function OpportunityExplorer({
                       </span>
                     </div>
 
-                    {/* Target Audience & Degree Requirements */}
                     <div className="text-xs text-slate-600 space-y-1 pt-1">
                       <p className="line-clamp-2 text-slate-600 text-[11px] leading-relaxed">
                         Target: <span className="font-semibold text-slate-800">{opp.target_audience || 'Kenyan University Students'}</span>
@@ -214,7 +204,6 @@ export default function OpportunityExplorer({
                       </div>
                     </div>
 
-                    {/* Meta info: Deadline Date */}
                     <div className="text-[11px] text-slate-500 flex items-center space-x-1.5 pt-1">
                       <Calendar className="w-3.5 h-3.5 text-slate-400" />
                       <span>Published Deadline: <strong>{opp.application_deadline || 'Rolling Admissions'}</strong></span>
@@ -222,7 +211,6 @@ export default function OpportunityExplorer({
 
                   </div>
 
-                  {/* Bottom Action Row (Image 2 style) */}
                   <div className="pt-4 mt-3 border-t border-slate-100 flex items-center justify-between gap-2">
                     <a
                       href={opp.official_url}

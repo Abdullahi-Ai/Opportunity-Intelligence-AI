@@ -92,8 +92,6 @@ def test_ambiguous_query_orchestrator_returns_clarification_not_dump():
     assert response["intent"] == IntentType.AMBIGUOUS_INCOMPLETE.value
     msg = response["response"]
     assert "are you looking for" in msg.lower() or "which area" in msg.lower() or "explore" in msg.lower()
-    # Ensure it did not dump an opportunity card or claim a match
     assert "Equity Leaders Program" not in msg
     assert "Safaricom" not in msg
-    # Verification that clarification options are provided
     assert "1." in msg and "2." in msg

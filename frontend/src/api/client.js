@@ -1,8 +1,3 @@
-/**
- * Opportunity Intelligence AI - Frontend API Client
- * Connects React UI to FastAPI backend endpoints.
- * Supports JWT authentication headers and role-based administrator actions.
- */
 
 const BASE_URL = '/api/v1';
 const TOKEN_KEY = 'oi_access_token';
@@ -37,7 +32,6 @@ async function request(endpoint, options = {}) {
 }
 
 export const api = {
-  // 1. Authentication & Role Authorization
   login: (email, password) => {
     return request('/auth/login', {
       method: 'POST',
@@ -54,7 +48,6 @@ export const api = {
 
   getMe: () => request('/auth/me'),
 
-  // 2. Opportunities Discovery (Public & Filtered)
   getOpportunities: (params = {}) => {
     const query = new URLSearchParams();
     if (params.category) query.append('category', params.category);
@@ -67,7 +60,6 @@ export const api = {
 
   getOpportunityDetails: (id) => request(`/opportunities/${id}`),
 
-  // 3. AI Assistant Chat & Memory Management
   chat: (message, conversationIdOrSession = null, sessionId = null, studentId = null) => {
     let conversationId = null;
     let actualSessionId = sessionId;
@@ -122,7 +114,6 @@ export const api = {
     });
   },
 
-  // 4. Deterministic Eligibility Checker
   assessEligibility: (data) => {
     return request('/agent/assess-eligibility', {
       method: 'POST',
@@ -130,7 +121,6 @@ export const api = {
     });
   },
 
-  // 5. Student Profile Management
   getProfile: (email) => request(`/profile/${encodeURIComponent(email)}`),
   saveProfile: (profileData) => {
     return request('/profile', {
@@ -144,7 +134,6 @@ export const api = {
     });
   },
 
-  // 6. Application Tracking & Checklists
   saveToTracker: (studentId, opportunityId, stage = 'Saved', notes = '') => {
     return request('/tracker/save', {
       method: 'POST',
@@ -196,7 +185,6 @@ export const api = {
 
   getDashboardStats: (studentId) => request(`/tracker/${studentId}/stats`),
 
-  // 7. Administrator Management (Guarded by require_admin on backend)
   adminCreateOpportunity: (data) => {
     return request('/admin/opportunities', {
       method: 'POST',

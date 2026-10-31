@@ -20,12 +20,10 @@ export default function HomeDashboard({
   onNavigateToExplore,
   onNavigateToAI 
 }) {
-  // Find next closing opportunity for the "Upcoming Deadlines" card
   const upcomingClosingOpp = opportunities.find(
     (o) => o.days_remaining !== null && o.days_remaining >= 0
   ) || opportunities[0];
 
-  // Top 3 featured opportunities
   const featuredOpps = opportunities.slice(0, 3);
 
   const topInstitutions = [
@@ -70,10 +68,8 @@ export default function HomeDashboard({
   return (
     <div className="space-y-8 animate-in fade-in duration-200">
       
-      {/* Top Row: Hero Banner & Upcoming Deadline Card (Exact Layout of Image 1) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         
-        {/* Left: Yellow/Gold Hero Banner (2 Columns) */}
         <div className="lg:col-span-2 rounded-3xl bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-300 p-8 text-slate-900 shadow-sm relative overflow-hidden flex flex-col justify-between min-h-[220px]">
           <div className="max-w-md z-10 space-y-2">
             <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-slate-900/10 text-slate-900 font-bold text-[11px] tracking-wide uppercase">
@@ -103,7 +99,6 @@ export default function HomeDashboard({
             </button>
           </div>
 
-          {/* Decorative Illustration Silhouette */}
           <div className="absolute right-4 bottom-2 opacity-90 hidden sm:block pointer-events-none">
             <div className="w-36 h-36 rounded-full bg-yellow-200/50 flex items-center justify-center">
               <GraduationCap className="w-24 h-24 text-amber-900/30" />
@@ -111,7 +106,6 @@ export default function HomeDashboard({
           </div>
         </div>
 
-        {/* Right: Upcoming Deadlines Card (Dark Card from Image 1) */}
         <div className="rounded-3xl bg-slate-950 p-6 text-white shadow-sm flex flex-col justify-between relative overflow-hidden">
           <div>
             <div className="flex items-center justify-between text-xs text-slate-400 mb-3">
@@ -154,7 +148,6 @@ export default function HomeDashboard({
 
       </div>
 
-      {/* Middle Row: Featured Opportunities Grid (like "Courses" in Image 1) */}
       <div className="space-y-4">
         <div className="flex justify-between items-center">
           <div>
@@ -229,10 +222,8 @@ export default function HomeDashboard({
         </div>
       </div>
 
-      {/* Bottom Row: Top Institutions & Partner Portals (Exact Layout of Image 1) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        {/* Left: Top Kenyan Institutions / Destinations (2 Columns) */}
         <div className="lg:col-span-2 space-y-4">
           <div>
             <h3 className="text-lg font-bold text-slate-900">Top Opportunity Providers in Kenya</h3>
@@ -262,7 +253,6 @@ export default function HomeDashboard({
           </div>
         </div>
 
-        {/* Right: Verified Partner Portals (1 Column like Image 1 Partnerships) */}
         <div className="space-y-4">
           <div>
             <h3 className="text-lg font-bold text-slate-900">Official Direct Portals</h3>

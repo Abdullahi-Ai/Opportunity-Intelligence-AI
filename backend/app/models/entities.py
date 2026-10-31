@@ -30,12 +30,11 @@ class User(Base):
     email = Column(String(255), unique=True, nullable=False, index=True)
     hashed_password = Column(String(255), nullable=False)
     full_name = Column(String(255), nullable=False)
-    role = Column(String(50), nullable=False, default="student")  # "student" or "admin"
+    role = Column(String(50), nullable=False, default="student")
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Relationships
     student_profile = relationship("StudentProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
     conversations = relationship("Conversation", back_populates="user", cascade="all, delete-orphan")
 
@@ -48,23 +47,22 @@ class StudentProfile(Base):
     full_name = Column(String(255), nullable=False)
     university = Column(String(255), nullable=False)
     field_of_study = Column(String(255), nullable=False)
-    degree_level = Column(String(50), nullable=False)  # Undergraduate, Diploma, Masters, PhD
+    degree_level = Column(String(50), nullable=False)
     year_of_study = Column(Integer, nullable=False)
     graduation_year = Column(Integer, nullable=True)
     county_of_origin = Column(String(100), nullable=True)
-    gpa_or_grade = Column(String(50), nullable=True)  # e.g. "First Class", "Upper Second", "B+"
-    preferred_categories = Column(String(255), nullable=True)  # Comma-separated e.g. "Scholarship, Internship"
+    gpa_or_grade = Column(String(50), nullable=True)
+    preferred_categories = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Relationships
     user = relationship("User", back_populates="student_profile")
     tracked_applications = relationship("TrackedApplication", back_populates="student", cascade="all, delete-orphan")
 
 class Opportunity(Base):
     __tablename__ = "opportunities"
 
-    id = Column(String(100), primary_key=True)  # Matches raw document ID, e.g. 'opp-safaricom-attachment-2026'
+    id = Column(String(100), primary_key=True)
     title = Column(String(255), nullable=False)
     provider = Column(String(255), nullable=False)
     category = Column(String(50), nullable=False, index=True)
@@ -73,13 +71,12 @@ class Opportunity(Base):
     degree_levels = Column(String(255), nullable=True)
     official_url = Column(Text, nullable=False)
     application_deadline = Column(String(50), nullable=True)
-    status = Column(String(50), default="open")  # open, expired, upcoming, uncertain
+    status = Column(String(50), default="open")
     is_verified = Column(Boolean, default=True)
     verification_date = Column(String(50), nullable=True)
     source_notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    # Relationships
     tracked_applications = relationship("TrackedApplication", back_populates="opportunity", cascade="all, delete-orphan")
 
 class TrackedApplication(Base):
@@ -88,7 +85,7 @@ class TrackedApplication(Base):
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     student_id = Column(String(36), ForeignKey("student_profiles.id", ondelete="CASCADE"), nullable=False)
     opportunity_id = Column(String(100), ForeignKey("opportunities.id", ondelete="CASCADE"), nullable=False)
-    stage = Column(String(50), default="Saved")  # Saved, Drafting, Submitted, Interview, Accepted, Rejected
+    stage = Column(String(50), default="Saved")
     target_submission_date = Column(Date, nullable=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -98,7 +95,6 @@ class TrackedApplication(Base):
         UniqueConstraint("student_id", "opportunity_id", name="uq_student_opportunity"),
     )
 
-    # Relationships
     student = relationship("StudentProfile", back_populates="tracked_applications")
     opportunity = relationship("Opportunity", back_populates="tracked_applications")
     checklists = relationship("ApplicationChecklist", back_populates="tracked_application", cascade="all, delete-orphan")
@@ -113,7 +109,6 @@ class ApplicationChecklist(Base):
     required_document_type = Column(String(100), nullable=True)
     completed_at = Column(DateTime, nullable=True)
 
-    # Relationships
     tracked_application = relationship("TrackedApplication", back_populates="checklists")
 
 class Conversation(Base):
@@ -123,12 +118,11 @@ class Conversation(Base):
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
     anonymous_session_id = Column(String(100), nullable=True, index=True)
     title = Column(String(255), default="New Conversation", nullable=False)
-    summary = Column(Text, nullable=True)  # Structured summary of progress and student facts
-    state_data = Column(Text, nullable=True)  # JSON-encoded conversation state
+    summary = Column(Text, nullable=True)
+    state_data = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Relationships
     user = relationship("User", back_populates="conversations")
     messages = relationship("ConversationMessage", back_populates="conversation", cascade="all, delete-orphan", order_by="ConversationMessage.created_at")
 
@@ -137,13 +131,12 @@ class ConversationMessage(Base):
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     conversation_id = Column(String(36), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
-    role = Column(String(20), nullable=False)  # "user", "assistant", "system"
+    role = Column(String(20), nullable=False)
     content = Column(Text, nullable=False)
     intent = Column(String(50), nullable=True)
-    citations = Column(Text, nullable=True)  # JSON list of citations
-    tool_calls = Column(Text, nullable=True)  # JSON list of tool executions
-    metadata_json = Column(Text, nullable=True)  # Extra context / state
+    citations = Column(Text, nullable=True)
+    tool_calls = Column(Text, nullable=True)
+    metadata_json = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    # Relationships
     conversation = relationship("Conversation", back_populates="messages")

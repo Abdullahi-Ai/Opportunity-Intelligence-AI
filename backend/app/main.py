@@ -36,13 +36,11 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Include structured database, auth, admin & conversational assistant routes
 app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(tracker_router)
 app.include_router(chat_router)
 
-# CORS Middleware configuration
 allowed_origins = [origin.strip() for origin in settings.ALLOWED_ORIGINS.split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,

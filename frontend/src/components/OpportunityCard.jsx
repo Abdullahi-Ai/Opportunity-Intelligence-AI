@@ -29,10 +29,8 @@ export default function OpportunityCard({ opportunity, onSelect, onCheckEligibil
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col justify-between overflow-hidden group">
       
-      {/* Top Banner */}
       <div className="p-5 pb-4">
         
-        {/* Category & Status Bar */}
         <div className="flex items-center justify-between gap-2 mb-3">
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${getCategoryColor(opportunity.category)}`}>
@@ -46,14 +44,12 @@ export default function OpportunityCard({ opportunity, onSelect, onCheckEligibil
             )}
           </div>
 
-          {/* Countdown Badge */}
           <div className={`flex items-center space-x-1 text-xs font-semibold px-2.5 py-1 rounded-lg border ${getBadgeStyle()}`}>
             <Calendar className="w-3.5 h-3.5" />
             <span>{opportunity.deadline_status_label || opportunity.application_deadline}</span>
           </div>
         </div>
 
-        {/* Title & Provider */}
         <h3 className="font-bold text-base text-slate-900 group-hover:text-brand-600 transition-colors line-clamp-2 leading-snug">
           {opportunity.title}
         </h3>
@@ -61,14 +57,12 @@ export default function OpportunityCard({ opportunity, onSelect, onCheckEligibil
           {opportunity.provider}
         </p>
 
-        {/* Target Audience / Summary */}
         {opportunity.target_audience && (
           <p className="text-xs text-slate-600 mt-2.5 line-clamp-2 leading-relaxed bg-slate-50 p-2.5 rounded-xl border border-slate-100">
             {opportunity.target_audience}
           </p>
         )}
 
-        {/* Degree & Field Tags */}
         <div className="flex flex-wrap gap-1.5 mt-3">
           {opportunity.degree_levels && (
             <span className="text-[11px] px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md">
@@ -84,7 +78,6 @@ export default function OpportunityCard({ opportunity, onSelect, onCheckEligibil
 
       </div>
 
-      {/* Action Footer */}
       <div className="px-5 py-3.5 bg-slate-50/70 border-t border-slate-100 flex items-center justify-between gap-2">
         <div className="flex items-center space-x-2">
           <button
@@ -104,7 +97,6 @@ export default function OpportunityCard({ opportunity, onSelect, onCheckEligibil
           </button>
         </div>
 
-        {/* Save / Track Button */}
         <button
           onClick={() => onSave(opportunity)}
           disabled={isTracked}

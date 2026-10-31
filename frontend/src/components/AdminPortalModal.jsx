@@ -103,7 +103,6 @@ export default function AdminPortalModal({ isOpen, onClose, opportunities, onOpp
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="relative bg-white rounded-3xl max-w-4xl w-full shadow-2xl border border-slate-100 overflow-hidden flex flex-col max-h-[90vh]">
         
-        {/* Header */}
         <div className="p-6 bg-gradient-to-r from-amber-700 to-amber-600 text-white flex justify-between items-center flex-shrink-0">
           <div className="flex items-center space-x-2.5">
             <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
@@ -130,10 +129,8 @@ export default function AdminPortalModal({ isOpen, onClose, opportunities, onOpp
           </div>
         </div>
 
-        {/* Content Body */}
         <div className="flex-1 overflow-y-auto p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
           
-          {/* Left Column: Opportunities Master List */}
           <div className="space-y-3">
             <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
               Published Records ({opportunities.length})
@@ -187,7 +184,6 @@ export default function AdminPortalModal({ isOpen, onClose, opportunities, onOpp
             </div>
           </div>
 
-          {/* Right Column: Edit/Create Form */}
           <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4">
             {isCreating || editingOpp ? (
               <form onSubmit={handleSave} className="space-y-3 text-xs">

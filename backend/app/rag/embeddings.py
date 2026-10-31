@@ -24,7 +24,6 @@ class RobustEmbeddingFunction(EmbeddingFunction[Documents]):
     def _get_engine(self):
         if self._engine is None:
             try:
-                # Prefer Chroma's built-in ONNX all-MiniLM-L6-v2 (fast, lightweight CPU execution)
                 from chromadb.utils import embedding_functions
                 logger.info("Initializing ONNX all-MiniLM-L6-v2 embedding function...")
                 self._engine = embedding_functions.DefaultEmbeddingFunction()

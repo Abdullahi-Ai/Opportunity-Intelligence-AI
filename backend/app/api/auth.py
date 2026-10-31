@@ -16,9 +16,6 @@ from app.core.auth import get_current_user
 
 router = APIRouter(prefix="/api/v1/auth", tags=["Authentication & Access Control"])
 
-# -------------------------------------------------------------
-# Request & Response Schemas
-# -------------------------------------------------------------
 class UserRegisterRequest(BaseModel):
     email: str = Field(..., description="Valid user email address")
     password: str = Field(..., min_length=6, description="User password (minimum 6 characters)")
@@ -26,7 +23,6 @@ class UserRegisterRequest(BaseModel):
     role: str = Field(default="student", description="'student' or 'admin'")
     admin_secret: Optional[str] = Field(default=None, description="Secret token required for admin role verification")
     
-    # Optional initial student profile fields
     university: Optional[str] = "University of Nairobi"
     field_of_study: Optional[str] = "Computer Science"
     degree_level: Optional[str] = "Undergraduate"
@@ -57,15 +53,11 @@ class AuthResponse(BaseModel):
     token_type: str = "bearer"
     user: UserResponse
 
-# -------------------------------------------------------------
-# Endpoints
-# -------------------------------------------------------------
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 def register(payload: UserRegisterRequest, db: Session = Depends(get_db)):
     """Register a new student or verified administrator account."""
     clean_email = payload.email.strip().lower()
     
-    # Check if user already exists
     existing_user = db.query(User).filter(User.email == clean_email).first()
     if existing_user:
         raise HTTPException(
@@ -73,7 +65,6 @@ def register(payload: UserRegisterRequest, db: Session = Depends(get_db)):
             detail="An account with this email address already exists. Please log in instead."
         )
     
-    # Verify administrator role request
     target_role = payload.role.strip().lower()
     if target_role == "admin":
         if not payload.admin_secret or payload.admin_secret.strip() != settings.ADMIN_REGISTRATION_SECRET:
@@ -84,7 +75,6 @@ def register(payload: UserRegisterRequest, db: Session = Depends(get_db)):
     else:
         target_role = "student"
     
-    # Create User
     new_user = User(
         email=clean_email,
         hashed_password=get_password_hash(payload.password),
@@ -95,10 +85,8 @@ def register(payload: UserRegisterRequest, db: Session = Depends(get_db)):
     db.add(new_user)
     db.flush()
     
-    # Create associated student profile if student
     profile_brief = None
     if target_role == "student":
-        # Check if existing profile with this email exists from earlier demo runs
         existing_profile = db.query(StudentProfile).filter(StudentProfile.email == clean_email).first()
         if existing_profile:
             existing_profile.user_id = new_user.id

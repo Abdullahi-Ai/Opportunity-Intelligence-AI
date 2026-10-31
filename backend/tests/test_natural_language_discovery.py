@@ -59,21 +59,17 @@ def test_opportunity_discovery_for_i_need_some_of_the_opportunity():
         assert res["intent"] == IntentType.OPPORTUNITY_DISCOVERY.value
         reply = res["response"]
 
-        # 1. Must NOT be an out-of-scope or not-found refusal
         assert "could not find verified kenyan records" not in reply.lower()
         assert "to prevent misinformation" not in reply.lower()
 
-        # 2. Must introduce the categories
         assert "help you discover opportunities" in reply.lower()
         assert "scholarships" in reply.lower()
         assert "attachments" in reply.lower() or "internships" in reply.lower()
         assert "graduate trainee" in reply.lower()
 
-        # 3. Must contain real verified opportunities
         assert len(res["citations"]) > 0
         assert "http" in reply
 
-        # 4. Must save discussed opportunities in state
         assert len(res["state"]["discussed_opportunities"]) >= 2
 
 
@@ -89,38 +85,30 @@ def test_contextual_multi_turn_followup_chain():
     }
 
     with SessionLocal() as db:
-        # Turn 1: Search for internships
         t1 = orch.process_turn("Show me internships for computer science students", conv_id, db=db, student_profile=student)
         assert t1["intent"] == IntentType.FIELD_SEARCH.value
 
-        # Turn 2: Follow up about Safaricom
         t2 = orch.process_turn("Tell me about Safaricom", conv_id, db=db, student_profile=student)
         assert t2["intent"] == IntentType.FOLLOW_UP_QUESTION.value
         assert "safaricom" in t2["response"].lower()
 
-        # Turn 3: Ask for requirements
         t3 = orch.process_turn("What are the requirements?", conv_id, db=db, student_profile=student)
         assert t3["intent"] == IntentType.EXPLAIN_REQUIREMENTS.value
         assert "requirements" in t3["response"].lower()
 
-        # Turn 4: Check eligibility (using student profile in memory)
         t4 = orch.process_turn("Am I eligible?", conv_id, db=db, student_profile=student)
         assert t4["intent"] == IntentType.ELIGIBILITY_ASSESSMENT.value
         assert "eligible" in t4["response"].lower()
 
-        # Turn 5: Check deadline
         t5 = orch.process_turn("What is the deadline?", conv_id, db=db, student_profile=student)
         assert t5["intent"] == IntentType.DEADLINE_INQUIRY.value
         assert "deadline" in t5["response"].lower()
 
-        # Turn 6: Help me apply
         t6 = orch.process_turn("Help me apply", conv_id, db=db, student_profile=student)
         assert t6["intent"] == IntentType.CHECKLIST_GENERATION.value
         assert "- [ ]" in t6["response"]
 
-        # Turn 7: Thank you
         t7 = orch.process_turn("Thank you", conv_id, db=db, student_profile=student)
         assert t7["intent"] == IntentType.THANK_YOU.value
         assert "welcome" in t7["response"].lower()
-        # Verify no tools executed on thank you
         assert len(t7["tool_calls"]) == 0

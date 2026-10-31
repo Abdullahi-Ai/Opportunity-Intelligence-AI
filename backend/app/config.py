@@ -3,42 +3,33 @@ from pydantic import Field, model_validator
 import os
 from pathlib import Path
 
-# Base backend directory
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 class Settings(BaseSettings):
-    # App Settings
     APP_NAME: str = "Opportunity Intelligence AI"
     APP_ENV: str = "development"
     DEBUG: bool = True
     PORT: int = 8000
     HOST: str = "0.0.0.0"
 
-    # Development-only default secrets. In production (APP_ENV=production), startup will strictly fail
-    # if these default values are not overridden by secure environment variables.
     SECRET_KEY: str = "super_secret_development_key_not_for_production_32chars"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7
     ADMIN_REGISTRATION_SECRET: str = "kenya_admin_secret_key_2026"
     
-    # LLM Settings
     GROQ_API_KEY: str = Field(default="", description="Groq Cloud API Key")
     GROQ_MODEL: str = "llama-3.3-70b-versatile"
     
-    # RAG Settings
     CHROMA_PERSIST_DIRECTORY: str = str(BASE_DIR / "data" / "chromadb")
     CHROMA_COLLECTION_NAME: str = "kenya_opportunities"
     EMBEDDING_MODEL_NAME: str = "sentence-transformers/all-MiniLM-L6-v2"
     RAW_DATA_DIRECTORY: str = str(BASE_DIR / "data" / "raw_opportunities")
     
-    # Relational DB Settings
     DATABASE_URL: str = f"sqlite:///{BASE_DIR}/data/app.db"
     
-    # CORS
     ALLOWED_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
     
     @model_validator(mode="after")
     def validate_production_secrets_and_paths(self):
-        # 1. Enforce production secret security
         is_production = self.APP_ENV.lower() in ["production", "prod", "staging"]
         insecure_secret_keys = {
             "super_secret_development_key_not_for_production_32chars",
@@ -76,12 +67,10 @@ class Settings(BaseSettings):
                     "CRITICAL SECURITY CONFIGURATION ERROR: ADMIN_REGISTRATION_SECRET must be at least 16 characters in length for production environments."
                 )
 
-        # 2. Ensure Chroma path is absolute anchored at BASE_DIR
         chroma_path = Path(self.CHROMA_PERSIST_DIRECTORY)
         if not chroma_path.is_absolute():
             self.CHROMA_PERSIST_DIRECTORY = str((BASE_DIR / chroma_path).resolve())
         
-        # 3. Ensure SQLite path is absolute anchored at BASE_DIR
         if self.DATABASE_URL.startswith("sqlite:///") and not self.DATABASE_URL.startswith("sqlite:////"):
             rel_part = self.DATABASE_URL.replace("sqlite:///", "")
             if rel_part.startswith("./"):

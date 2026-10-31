@@ -30,9 +30,6 @@ Base.metadata.create_all(bind=engine)
 
 router = APIRouter(prefix="/api/v1", tags=["Application Data & Tracking"])
 
-# -------------------------------------------------------------
-# Security Helper Functions
-# -------------------------------------------------------------
 def resolve_student_for_user(
     current_user: User,
     db: Session,
@@ -43,7 +40,6 @@ def resolve_student_for_user(
     Verifies that non-admin users can ONLY access their own student profile.
     If requested_student_id is provided, verifies ownership.
     """
-    # 1. Admin bypass: admins can manage any student if requested_student_id is specified
     if current_user.role == "admin":
         if requested_student_id:
             student = db.query(StudentProfile).filter(StudentProfile.id == requested_student_id).first()
@@ -53,7 +49,6 @@ def resolve_student_for_user(
         if current_user.student_profile:
             return current_user.student_profile
 
-    # 2. Student user resolution
     student = current_user.student_profile
     if not student:
         student = db.query(StudentProfile).filter(
@@ -70,7 +65,6 @@ def resolve_student_for_user(
             detail="Student profile not found. Please create your student profile first."
         )
 
-    # 3. Ownership verification against requested_student_id
     if requested_student_id and student.id != requested_student_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -79,9 +73,6 @@ def resolve_student_for_user(
 
     return student
 
-# -------------------------------------------------------------
-# Schemas
-# -------------------------------------------------------------
 class OpportunitySummaryResponse(BaseModel):
     id: str
     title: str
@@ -159,9 +150,6 @@ class DashboardStatsResponse(BaseModel):
     checklist_completion_rate: float
     urgent_deadlines_count: int
 
-# -------------------------------------------------------------
-# 1. Opportunity Discovery & Filtering APIs
-# -------------------------------------------------------------
 @router.get("/opportunities", response_model=List[OpportunitySummaryResponse])
 def list_opportunities(
     category: Optional[str] = Query(None, description="Filter by category: Scholarship, Internship, Graduate Trainee, etc."),
@@ -196,7 +184,6 @@ def list_opportunities(
     results = []
 
     for opp in opportunities:
-        # Compute dynamic date countdown deterministically
         cd_res = tool_calculate_deadline_countdown(
             DeadlineCountdownInput(deadline_date_str=opp.application_deadline)
         )
@@ -257,9 +244,6 @@ def get_opportunity_details(opportunity_id: str, db: Session = Depends(get_db)):
         deadline_status_label=label
     )
 
-# -------------------------------------------------------------
-# 2. Student Profile & Preferences APIs (Secured with JWT)
-# -------------------------------------------------------------
 @router.post("/profile", response_model=StudentProfileResponse, status_code=status.HTTP_201_CREATED)
 def create_or_update_profile(
     payload: StudentProfileCreate,
@@ -269,7 +253,6 @@ def create_or_update_profile(
     """Creates or updates a student profile record for the authenticated user."""
     clean_email = payload.email.strip().lower()
 
-    # Non-admin cannot create/update a profile for another user's email
     if current_user.role != "admin" and clean_email != current_user.email.strip().lower():
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -335,9 +318,6 @@ def delete_profile(
     db.commit()
     return {"status": "success", "message": f"Student profile {email} and all tracked records deleted."}
 
-# -------------------------------------------------------------
-# 3. Application Tracking & Checklist APIs (Secured with JWT)
-# -------------------------------------------------------------
 @router.post("/tracker/save", status_code=status.HTTP_201_CREATED)
 def save_opportunity_to_tracker(
     payload: TrackApplicationRequest,
@@ -372,7 +352,6 @@ def save_opportunity_to_tracker(
     db.commit()
     db.refresh(tracked_app)
 
-    # Automatically populate checklist tasks from verified knowledge base
     if payload.auto_generate_checklist:
         checklist_result = tool_generate_application_checklist(
             GenerateChecklistInput(opportunity_id=payload.opportunity_id)
@@ -441,7 +420,6 @@ def update_application_stage(
     if not tracked_app:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tracked application not found.")
 
-    # Ownership check
     if current_user.role != "admin":
         student = resolve_student_for_user(current_user, db)
         if tracked_app.student_id != student.id:
@@ -466,7 +444,6 @@ def add_custom_checklist_item(
     if not tracked_app:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tracked application not found.")
 
-    # Ownership check
     if current_user.role != "admin":
         student = resolve_student_for_user(current_user, db)
         if tracked_app.student_id != student.id:
@@ -497,7 +474,6 @@ def toggle_checklist_completion(
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Checklist task not found.")
 
-    # Ownership check via item.tracked_application
     if current_user.role != "admin":
         student = resolve_student_for_user(current_user, db)
         if not item.tracked_application or item.tracked_application.student_id != student.id:
@@ -527,7 +503,6 @@ def delete_checklist_item(
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Checklist task not found.")
 
-    # Ownership check via item.tracked_application
     if current_user.role != "admin":
         student = resolve_student_for_user(current_user, db)
         if not item.tracked_application or item.tracked_application.student_id != student.id:
@@ -561,7 +536,6 @@ def get_dashboard_stats(
     completed_tasks = sum(1 for c in checklists if c.is_completed)
     completion_rate = round((completed_tasks / total_tasks * 100), 1) if total_tasks > 0 else 0.0
 
-    # Count urgent deadlines (closing within 14 days)
     urgent_count = 0
     for app in tracked_apps:
         if app.opportunity and app.opportunity.application_deadline:

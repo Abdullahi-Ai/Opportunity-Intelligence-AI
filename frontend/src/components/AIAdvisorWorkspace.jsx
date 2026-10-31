@@ -63,7 +63,6 @@ export default function AIAdvisorWorkspace({ student, user }) {
     scrollToBottom();
   }, [messages, loading]);
 
-  // Load active conversation from database if conversationId exists
   useEffect(() => {
     let isMounted = true;
     async function loadSavedConversation() {
@@ -174,7 +173,6 @@ export default function AIAdvisorWorkspace({ student, user }) {
   return (
     <div className="flex flex-col h-[calc(100vh-7rem)] bg-white rounded-3xl border border-slate-200/80 shadow-sm overflow-hidden animate-in fade-in duration-200">
       
-      {/* Top Bar: Model Indicator & Controls */}
       <div className="h-14 px-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50 flex-shrink-0">
         <div className="flex items-center space-x-2.5">
           <div className="w-7 h-7 rounded-xl bg-gradient-to-tr from-brand-600 to-indigo-600 flex items-center justify-center text-white shadow-sm">
@@ -211,11 +209,9 @@ export default function AIAdvisorWorkspace({ student, user }) {
         </div>
       </div>
 
-      {/* Main Area: Empty State OR Message Stream */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
         
         {messages.length === 0 ? (
-          /* Empty State */
           <div className="max-w-2xl mx-auto py-10 space-y-8 text-center animate-in fade-in zoom-in-95 duration-200">
             
             <div className="space-y-3">
@@ -230,7 +226,6 @@ export default function AIAdvisorWorkspace({ student, user }) {
               </p>
             </div>
 
-            {/* Central Prompt Input Box */}
             <div className="bg-slate-50 border border-slate-200 rounded-3xl p-4 shadow-sm text-left space-y-3">
               <textarea
                 rows={3}
@@ -265,7 +260,6 @@ export default function AIAdvisorWorkspace({ student, user }) {
               </div>
             </div>
 
-            {/* Quick Clarification Chips */}
             <div className="space-y-2 text-left">
               <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
                 Quick Category Shortcuts:
@@ -283,7 +277,6 @@ export default function AIAdvisorWorkspace({ student, user }) {
               </div>
             </div>
 
-            {/* Starter Suggestion Cards */}
             <div className="space-y-3 text-left">
               <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
                 Featured Verified Opportunities:
@@ -308,7 +301,6 @@ export default function AIAdvisorWorkspace({ student, user }) {
 
           </div>
         ) : (
-          /* Active Chat Stream */
           <div className="max-w-3xl mx-auto space-y-4">
             {messages.map((msg, index) => (
               <div
@@ -356,7 +348,6 @@ export default function AIAdvisorWorkspace({ student, user }) {
                         {msg.content}
                       </ReactMarkdown>
 
-                      {/* Interactive Clarification Chips for Ambiguous Responses */}
                       {msg.intent === 'ambiguous_incomplete' && (
                         <div className="pt-2 border-t border-slate-200/70 flex flex-wrap gap-1.5">
                           <span className="text-[10px] font-bold text-slate-400 block w-full">Choose an option to proceed:</span>
@@ -372,7 +363,6 @@ export default function AIAdvisorWorkspace({ student, user }) {
                         </div>
                       )}
 
-                      {/* Official Sources Citations */}
                       {msg.citations && msg.citations.length > 0 && (
                         <div className="mt-3 pt-3 border-t border-slate-200/80 text-[11px]">
                           <span className="font-bold text-slate-500 block mb-1.5">Official Verified Sources:</span>
@@ -420,7 +410,6 @@ export default function AIAdvisorWorkspace({ student, user }) {
 
       </div>
 
-      {/* Bottom Bar: Input when messages exist */}
       {messages.length > 0 && (
         <div className="p-4 border-t border-slate-100 bg-white flex-shrink-0">
           <form

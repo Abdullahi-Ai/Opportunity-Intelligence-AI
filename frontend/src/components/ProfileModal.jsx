@@ -54,7 +54,6 @@ export default function ProfileModal({ isOpen, onClose, student, onProfileSaved,
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl border border-slate-100 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         
-        {/* Header */}
         <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-brand-50 to-white">
           <div className="flex items-center space-x-2.5">
             <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center font-bold text-xs">
@@ -70,7 +69,6 @@ export default function ProfileModal({ isOpen, onClose, student, onProfileSaved,
           </button>
         </div>
 
-        {/* Form */}
         <form onSubmit={handleSubmit} className="p-5 space-y-3.5 text-xs text-slate-700">
           <div>
             <label className="block text-slate-500 font-medium mb-1">Email Address</label>
@@ -174,7 +172,6 @@ export default function ProfileModal({ isOpen, onClose, student, onProfileSaved,
             </div>
           </div>
 
-          {/* Privacy Note */}
           <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 text-[11px] text-slate-500 leading-relaxed flex items-start space-x-2">
             <ShieldAlert className="w-4 h-4 text-slate-400 mt-0.5 flex-shrink-0" />
             <span>
@@ -182,7 +179,6 @@ export default function ProfileModal({ isOpen, onClose, student, onProfileSaved,
             </span>
           </div>
 
-          {/* Actions */}
           <div className="pt-2 flex items-center justify-between border-t border-slate-100">
             <button
               type="button"

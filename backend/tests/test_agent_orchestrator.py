@@ -14,7 +14,6 @@ def test_conversational_greetings():
         assert len(res["tool_calls"]) == 0
         assert "Opportunity Intelligence AI" in res["response"]
         assert "Kenya" in res["response"]
-        # Ensure raw chunk metadata markers are not in conversational greeting
         assert "#### [Kenya Revenue Authority" not in res["response"]
         assert "#### [" not in res["response"]
 
@@ -25,7 +24,6 @@ def test_opportunity_query_deduplication():
         session_id="test_dedup_session"
     )
     assert res["grounded"] is True
-    # The title should appear once as a heading, not duplicated multiple times
     assert res["response"].count("#### [Safaricom") <= 1
     assert len(res["citations"]) > 0
 
@@ -39,7 +37,6 @@ def test_out_of_domain_and_insufficient_evidence():
     assert "could not find verified records" in res["response"].lower() or "cannot find verified" in res["response"].lower()
 
 def test_tool_dispatch_execution():
-    # 1. Test search tool execution
     search_res = agent_orchestrator.execute_tool(
         "search_opportunities",
         {"query": "Safaricom attachment", "top_k": 2}
@@ -47,7 +44,6 @@ def test_tool_dispatch_execution():
     assert search_res["status"] == "success"
     assert search_res["count"] > 0
 
-    # 2. Test deadline countdown tool execution
     date_res = agent_orchestrator.execute_tool(
         "calculate_deadline_countdown",
         {"deadline_date_str": "2026-11-30"}
@@ -55,7 +51,6 @@ def test_tool_dispatch_execution():
     assert date_res["status"] in ["open", "expired", "closing_today"]
     assert "deadline" in date_res
 
-    # 3. Test eligibility assessment tool execution
     elig_res = agent_orchestrator.execute_tool(
         "assess_eligibility",
         {
@@ -68,7 +63,6 @@ def test_tool_dispatch_execution():
     assert elig_res["status"] == "success"
     assert "Likely Eligible" in elig_res["overall_assessment"]
 
-    # 4. Test checklist tool execution
     chk_res = agent_orchestrator.execute_tool(
         "generate_application_checklist",
         {"opportunity_id": "opp-hef-undergraduate-2026"}
@@ -107,7 +101,6 @@ def test_agent_fallback_eligibility_query_with_student_profile():
 
 def test_agent_multi_turn_context_memory():
     session_id = "test_multi_turn_memory"
-    # Turn 1
     agent_orchestrator.chat(
         message="Tell me about Chevening scholarship in Kenya.",
         session_id=session_id
@@ -115,7 +108,6 @@ def test_agent_multi_turn_context_memory():
     assert session_id in SESSION_CONTEXT_CACHE
     assert len(SESSION_CONTEXT_CACHE[session_id]) >= 2
 
-    # Turn 2
     agent_orchestrator.chat(
         message="What are the work experience requirements?",
         session_id=session_id

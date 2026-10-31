@@ -10,12 +10,10 @@ Implements strictly typed Pydantic tools for:
 from typing import Dict, List, Any, Optional
 from datetime import date, datetime
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 from app.rag.vector_store import vector_store
 
-# ---------------------------------------------------------
-# Tool 1: Vector Search Tool
-# ---------------------------------------------------------
 class SearchOpportunitiesInput(BaseModel):
     query: str = Field(description="Natural language search query for scholarships, internships, or requirements.")
     category: Optional[str] = Field(default=None, description="Optional category filter: Scholarship, Internship, Graduate Trainee, Fellowship, Competition")
@@ -45,7 +43,11 @@ def tool_search_opportunities(input_data: SearchOpportunitiesInput) -> Dict[str,
                 "category": r["metadata"].get("category"),
                 "section": r["metadata"].get("section_title"),
                 "deadline": r["metadata"].get("application_deadline"),
+                "published_deadline": r["metadata"].get("application_deadline"),
                 "official_url": r["metadata"].get("official_url"),
+                "verification_status": r["metadata"].get("verification_status", "verified"),
+                "degree_levels": r["metadata"].get("degree_levels"),
+                "fields_of_study": r["metadata"].get("fields_of_study"),
                 "content_excerpt": r["content"],
                 "similarity_score": r["similarity_score"]
             }
@@ -53,9 +55,6 @@ def tool_search_opportunities(input_data: SearchOpportunitiesInput) -> Dict[str,
         ]
     }
 
-# ---------------------------------------------------------
-# Tool 2: Deterministic Deadline Countdown Tool
-# ---------------------------------------------------------
 class DeadlineCountdownInput(BaseModel):
     deadline_date_str: Optional[str] = Field(default=None, description="ISO format deadline string YYYY-MM-DD (e.g. '2026-11-30') or None/empty for rolling")
     deadline_str: Optional[str] = Field(default=None, description="Alias for deadline_date_str")
@@ -145,9 +144,6 @@ def tool_calculate_deadline_countdown(input_data: DeadlineCountdownInput) -> Dic
             "summary": f"{delta_days} day(s) remaining until the deadline on {target_date}."
         }
 
-# ---------------------------------------------------------
-# Tool 3: Rule-Based Eligibility Assessment Tool
-# ---------------------------------------------------------
 class AssessEligibilityInput(BaseModel):
     opportunity_id: str = Field(description="Target opportunity ID (e.g. 'opp-safaricom-attachment-2026')")
     student_degree_level: str = Field(description="e.g. 'Undergraduate', 'Diploma', 'Masters', 'PhD'")
@@ -160,7 +156,6 @@ def tool_assess_eligibility(input_data: AssessEligibilityInput) -> Dict[str, Any
     Evaluates published opportunity criteria against student parameters.
     Returns criteria breakdown classified as Meets, Does Not Meet, or Needs Verification.
     """
-    # Retrieve eligibility chunk specifically
     results = vector_store.search(
         query=f"{input_data.opportunity_id} eligibility criteria minimum requirements",
         top_k=2
@@ -184,7 +179,6 @@ def tool_assess_eligibility(input_data: AssessEligibilityInput) -> Dict[str, Any
 
     evaluations = []
 
-    # 1. Degree level check
     student_deg = input_data.student_degree_level.lower()
     if not allowed_degrees or any(deg in student_deg or student_deg in deg for deg in allowed_degrees):
         evaluations.append({
@@ -201,7 +195,6 @@ def tool_assess_eligibility(input_data: AssessEligibilityInput) -> Dict[str, Any
             "status": "Does Not Meet"
         })
 
-    # 2. Field of study check
     student_field = input_data.student_field_of_study.lower()
     if not allowed_fields or "all fields" in allowed_fields or any(f in student_field or student_field in f for f in allowed_fields):
         evaluations.append({
@@ -218,7 +211,6 @@ def tool_assess_eligibility(input_data: AssessEligibilityInput) -> Dict[str, Any
             "status": "Needs Verification"
         })
 
-    # 3. Year of study / Industrial attachment check
     if "attachment" in input_data.opportunity_id:
         if input_data.student_year_of_study in [2, 3, 4]:
             evaluations.append({
@@ -235,7 +227,6 @@ def tool_assess_eligibility(input_data: AssessEligibilityInput) -> Dict[str, Any
                 "status": "Does Not Meet"
             })
 
-    # Determine overall status
     statuses = [e["status"] for e in evaluations]
     if "Does Not Meet" in statuses:
         overall = "Ineligible / Unlikely to Meet Criteria"
@@ -255,9 +246,6 @@ def tool_assess_eligibility(input_data: AssessEligibilityInput) -> Dict[str, Any
         "disclaimer": "This automated assessment is an informational guide based on published criteria. Final eligibility is determined exclusively by the sponsoring organization."
     }
 
-# ---------------------------------------------------------
-# Tool 4: Actionable Checklist Generator Tool
-# ---------------------------------------------------------
 class GenerateChecklistInput(BaseModel):
     opportunity_id: str = Field(description="Target opportunity ID.")
 
@@ -308,3 +296,112 @@ def tool_generate_application_checklist(input_data: GenerateChecklistInput) -> D
         "official_url": meta.get("official_url"),
         "tasks": tasks
     }
+
+class GetTrackedApplicationsInput(BaseModel):
+    student_profile_id: Optional[str] = Field(
+        default=None,
+        description="Optional student profile ID. If omitted, the authenticated student's tracker is loaded."
+    )
+
+def tool_get_tracked_applications(
+    input_data: GetTrackedApplicationsInput,
+    authenticated_student_id: Optional[str] = None,
+    db: Optional[Session] = None
+) -> Dict[str, Any]:
+    if not authenticated_student_id:
+        return {
+            "status": "unauthenticated",
+            "message": "Student is not authenticated or has not linked a student profile.",
+            "applications": []
+        }
+    if input_data.student_profile_id and input_data.student_profile_id != authenticated_student_id:
+        return {
+            "status": "forbidden",
+            "message": "Access denied: Cannot access other students' tracked applications.",
+            "applications": []
+        }
+    if not db:
+        return {
+            "status": "error",
+            "message": "Database session not available for tracking operations.",
+            "applications": []
+        }
+
+    from app.models.entities import TrackedApplication, Opportunity
+    tracked = db.query(TrackedApplication).filter(
+        TrackedApplication.student_id == authenticated_student_id
+    ).all()
+
+    results = []
+    for app in tracked:
+        opp = app.opportunity
+        results.append({
+            "application_id": app.id,
+            "opportunity_id": opp.id if opp else app.opportunity_id,
+            "title": opp.title if opp else "Unknown",
+            "provider": opp.provider if opp else "Unknown",
+            "stage": app.stage,
+            "official_url": opp.official_url if opp else None,
+            "deadline": opp.application_deadline if opp else None,
+            "tasks_count": len(app.checklists) if app.checklists else 0,
+            "completed_tasks": sum(1 for t in (app.checklists or []) if t.is_completed)
+        })
+
+    return {
+        "status": "success",
+        "student_id": authenticated_student_id,
+        "count": len(results),
+        "applications": results
+    }
+
+TOOL_REGISTRY = {
+    "search_opportunities": tool_search_opportunities,
+    "tool_search_opportunities": tool_search_opportunities,
+    "calculate_deadline_countdown": tool_calculate_deadline_countdown,
+    "tool_calculate_deadline_countdown": tool_calculate_deadline_countdown,
+    "assess_eligibility": tool_assess_eligibility,
+    "tool_assess_eligibility": tool_assess_eligibility,
+    "generate_application_checklist": tool_generate_application_checklist,
+    "tool_generate_application_checklist": tool_generate_application_checklist,
+    "get_tracked_applications": tool_get_tracked_applications,
+    "tool_get_tracked_applications": tool_get_tracked_applications,
+}
+
+TOOL_INPUT_MODELS = {
+    "search_opportunities": SearchOpportunitiesInput,
+    "tool_search_opportunities": SearchOpportunitiesInput,
+    "calculate_deadline_countdown": DeadlineCountdownInput,
+    "tool_calculate_deadline_countdown": DeadlineCountdownInput,
+    "assess_eligibility": AssessEligibilityInput,
+    "tool_assess_eligibility": AssessEligibilityInput,
+    "generate_application_checklist": GenerateChecklistInput,
+    "tool_generate_application_checklist": GenerateChecklistInput,
+    "get_tracked_applications": GetTrackedApplicationsInput,
+    "tool_get_tracked_applications": GetTrackedApplicationsInput,
+}
+
+def execute_registered_tool(
+    tool_name: str,
+    tool_args: Dict[str, Any],
+    authenticated_student_id: Optional[str] = None,
+    db: Optional[Session] = None
+) -> Dict[str, Any]:
+    norm_name = tool_name.strip()
+    if norm_name not in TOOL_REGISTRY:
+        return {"status": "error", "message": f"Unknown tool '{tool_name}'"}
+
+    input_cls = TOOL_INPUT_MODELS.get(norm_name)
+    func = TOOL_REGISTRY[norm_name]
+
+    try:
+        validated_input = input_cls(**tool_args)
+    except Exception as e:
+        return {"status": "validation_error", "message": f"Invalid arguments for {tool_name}: {str(e)}"}
+
+    try:
+        if norm_name in ["get_tracked_applications", "tool_get_tracked_applications"]:
+            return func(validated_input, authenticated_student_id=authenticated_student_id, db=db)
+        return func(validated_input)
+    except Exception as e:
+        return {"status": "error", "message": f"Tool execution error: {str(e)}"}
+

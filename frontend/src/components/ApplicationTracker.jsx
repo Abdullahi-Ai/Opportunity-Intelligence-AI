@@ -134,7 +134,6 @@ export default function ApplicationTracker({ student, onOpenAssistant }) {
   return (
     <div className="space-y-6">
       
-      {/* Dashboard Metrics Header */}
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-sm flex items-center space-x-3">
@@ -179,7 +178,6 @@ export default function ApplicationTracker({ student, onOpenAssistant }) {
         </div>
       )}
 
-      {/* Filter Tabs & Refresh */}
       <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
         <div className="flex items-center space-x-1.5 p-1 bg-white rounded-xl border border-slate-200 text-xs">
           {['All', 'Saved', 'Drafting', 'Submitted'].map((stage) => (
@@ -206,7 +204,6 @@ export default function ApplicationTracker({ student, onOpenAssistant }) {
         </button>
       </div>
 
-      {/* Tracked Applications List */}
       {loading ? (
         <div className="py-12 text-center text-slate-500 text-sm">
           <RefreshCw className="w-6 h-6 animate-spin mx-auto text-brand-600 mb-2" />
@@ -232,7 +229,6 @@ export default function ApplicationTracker({ student, onOpenAssistant }) {
                 key={app.id}
                 className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm hover:shadow-md transition-all space-y-4"
               >
-                {/* Header row */}
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700">
@@ -246,7 +242,6 @@ export default function ApplicationTracker({ student, onOpenAssistant }) {
                     </p>
                   </div>
 
-                  {/* Stage Selector */}
                   <div className="flex items-center space-x-2">
                     <span className="text-xs text-slate-500 font-medium">Stage:</span>
                     <select
@@ -272,7 +267,6 @@ export default function ApplicationTracker({ student, onOpenAssistant }) {
                   </div>
                 </div>
 
-                {/* Progress Bar */}
                 <div>
                   <div className="flex justify-between text-xs text-slate-500 mb-1">
                     <span>Preparation Checklist Progress</span>
@@ -288,7 +282,6 @@ export default function ApplicationTracker({ student, onOpenAssistant }) {
                   </div>
                 </div>
 
-                {/* Checklists items */}
                 <div className="space-y-2 pt-1">
                   {app.checklists.map((task) => (
                     <div
@@ -322,7 +315,6 @@ export default function ApplicationTracker({ student, onOpenAssistant }) {
                     </div>
                   ))}
 
-                  {/* Add Custom Task Input */}
                   <div className="flex items-center space-x-2 pt-2">
                     <input
                       type="text"
