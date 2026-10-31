@@ -262,7 +262,7 @@ class AgentOrchestrator:
 
         if not target_id:
             search_res = tool_search_opportunities(SearchOpportunitiesInput(query=message, top_k=1))
-            if search_res.get("results"):
+            if search_res.get("results") and search_res["results"][0].get("similarity_score", 0.0) >= 0.50:
                 target_id = search_res["results"][0].get("opportunity_id")
 
         if not target_id:
@@ -627,7 +627,7 @@ class AgentOrchestrator:
 
             if not target_id:
                 opp_search = tool_search_opportunities(SearchOpportunitiesInput(query=message, top_k=1))
-                if opp_search.get("results"):
+                if opp_search.get("results") and opp_search["results"][0].get("similarity_score", 0.0) >= 0.50:
                     target_id = opp_search["results"][0].get("opportunity_id")
 
             if target_id:
@@ -666,7 +666,7 @@ class AgentOrchestrator:
 
             if not target_id:
                 search_res = tool_search_opportunities(SearchOpportunitiesInput(query=message, top_k=1))
-                if search_res.get("results"):
+                if search_res.get("results") and search_res["results"][0].get("similarity_score", 0.0) >= 0.50:
                     target_id = search_res["results"][0].get("opportunity_id")
 
             mem = state.student_memory
@@ -682,28 +682,37 @@ class AgentOrchestrator:
                     student_year_of_study=int(yr)
                 ))
                 tool_calls_executed.append({"tool": "assess_eligibility", "opportunity_id": target_id})
-                opp_title = eval_res.get("title") or eval_res.get("opportunity_title", "Opportunity")
-                opp_url = eval_res.get("official_url", "")
-                if opp_url:
-                    citations.append({"title": opp_title, "url": opp_url})
 
-                breakdown_md = "\n".join([
-                    f"- **{crit['criterion']}:** `{crit['status']}` — Required: {crit.get('required')} | Provided: {crit.get('provided')}"
-                    for crit in eval_res.get("criteria_breakdown", [])
-                ])
+                if eval_res.get("status") == "success":
+                    opp_title = eval_res.get("title") or eval_res.get("opportunity_title", "Opportunity")
+                    opp_url = eval_res.get("official_url", "")
+                    if opp_url:
+                        citations.append({"title": opp_title, "url": opp_url})
 
-                final_reply = (
-                    f"### Eligibility Assessment: {opp_title}\n\n"
-                    f"**Overall Result:** **{eval_res.get('overall_assessment')}**\n\n"
-                    f"**Evaluated Criteria Breakdown:**\n{breakdown_md}\n\n"
-                    f"🔗 **Official Link:** [{opp_title}]({opp_url})\n\n"
-                    f"> ⚠️ *Disclaimer: {eval_res.get('disclaimer')}*"
-                )
-                state.pending_question = {
-                    "question": "Would you like me to generate the required document checklist for this opportunity?",
-                    "topic": "confirm_checklist",
-                    "context": {"opportunity_id": target_id}
-                }
+                    breakdown_md = "\n".join([
+                        f"- **{crit['criterion']}:** `{crit['status']}` — Required: {crit.get('required')} | Provided: {crit.get('provided')}"
+                        for crit in eval_res.get("criteria_breakdown", [])
+                    ])
+
+                    final_reply = (
+                        f"### Eligibility Assessment: {opp_title}\n\n"
+                        f"**Overall Result:** **{eval_res.get('overall_assessment')}**\n\n"
+                        f"**Evaluated Criteria Breakdown:**\n{breakdown_md}\n\n"
+                        f"🔗 **Official Link:** [{opp_title}]({opp_url})\n\n"
+                        f"> ⚠️ *Disclaimer: {eval_res.get('disclaimer')}*"
+                    )
+                    state.pending_question = {
+                        "question": "Would you like me to generate the required document checklist for this opportunity?",
+                        "topic": "confirm_checklist",
+                        "context": {"opportunity_id": target_id}
+                    }
+                else:
+                    final_reply = (
+                        f"I could not verify published eligibility criteria for '{target_id}' in our verified directory.\n\n"
+                        "To prevent misinformation, I only evaluate criteria certified against official published notices. "
+                        "Please check the official provider portal directly or ask about another verified opportunity (e.g. *Safaricom attachment*, *HEF*, *Chevening*, *KRA*)."
+                    )
+                    state.pending_question = None
             else:
                 final_reply = "Which opportunity would you like me to check your eligibility for? Please mention the name (e.g. *Safaricom attachment*, *Chevening*, *HEF*)."
                 state.pending_question = {"question": "Specify opportunity for eligibility", "topic": "ask_eligibility_opp", "context": {}}

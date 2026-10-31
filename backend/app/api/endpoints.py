@@ -17,7 +17,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_, func
 
 from app.db.session import get_db, Base, engine
-from app.models.entities import StudentProfile, Opportunity, TrackedApplication, ApplicationChecklist
+from app.models.entities import User, StudentProfile, Opportunity, TrackedApplication, ApplicationChecklist
+from app.core.auth import get_current_user
 from app.agent.tools import (
     tool_calculate_deadline_countdown,
     DeadlineCountdownInput,
@@ -28,6 +29,55 @@ from app.agent.tools import (
 Base.metadata.create_all(bind=engine)
 
 router = APIRouter(prefix="/api/v1", tags=["Application Data & Tracking"])
+
+# -------------------------------------------------------------
+# Security Helper Functions
+# -------------------------------------------------------------
+def resolve_student_for_user(
+    current_user: User,
+    db: Session,
+    requested_student_id: Optional[str] = None
+) -> StudentProfile:
+    """
+    Resolves the student profile associated with the authenticated user.
+    Verifies that non-admin users can ONLY access their own student profile.
+    If requested_student_id is provided, verifies ownership.
+    """
+    # 1. Admin bypass: admins can manage any student if requested_student_id is specified
+    if current_user.role == "admin":
+        if requested_student_id:
+            student = db.query(StudentProfile).filter(StudentProfile.id == requested_student_id).first()
+            if not student:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student profile not found.")
+            return student
+        if current_user.student_profile:
+            return current_user.student_profile
+
+    # 2. Student user resolution
+    student = current_user.student_profile
+    if not student:
+        student = db.query(StudentProfile).filter(
+            or_(StudentProfile.user_id == current_user.id, StudentProfile.email == current_user.email)
+        ).first()
+        if student and not student.user_id:
+            student.user_id = current_user.id
+            db.commit()
+            db.refresh(student)
+
+    if not student:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Student profile not found. Please create your student profile first."
+        )
+
+    # 3. Ownership verification against requested_student_id
+    if requested_student_id and student.id != requested_student_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: You do not have permission to access another student's records."
+        )
+
+    return student
 
 # -------------------------------------------------------------
 # Schemas
@@ -208,59 +258,104 @@ def get_opportunity_details(opportunity_id: str, db: Session = Depends(get_db)):
     )
 
 # -------------------------------------------------------------
-# 2. Student Profile & Preferences APIs
+# 2. Student Profile & Preferences APIs (Secured with JWT)
 # -------------------------------------------------------------
 @router.post("/profile", response_model=StudentProfileResponse, status_code=status.HTTP_201_CREATED)
-def create_or_update_profile(payload: StudentProfileCreate, db: Session = Depends(get_db)):
-    """Creates or updates a student profile record."""
-    student = db.query(StudentProfile).filter(StudentProfile.email == payload.email).first()
+def create_or_update_profile(
+    payload: StudentProfileCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Creates or updates a student profile record for the authenticated user."""
+    clean_email = payload.email.strip().lower()
+
+    # Non-admin cannot create/update a profile for another user's email
+    if current_user.role != "admin" and clean_email != current_user.email.strip().lower():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: You can only create or update your own student profile."
+        )
+
+    student = db.query(StudentProfile).filter(StudentProfile.email == clean_email).first()
     if student:
+        if student.user_id and student.user_id != current_user.id and current_user.role != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: This student profile is owned by another user."
+            )
         for key, val in payload.model_dump().items():
             setattr(student, key, val)
+        if not student.user_id:
+            student.user_id = current_user.id
     else:
-        student = StudentProfile(**payload.model_dump())
+        data = payload.model_dump()
+        student = StudentProfile(**data, user_id=current_user.id)
         db.add(student)
     db.commit()
     db.refresh(student)
     return student
 
 @router.get("/profile/{email}", response_model=StudentProfileResponse)
-def get_profile(email: str, db: Session = Depends(get_db)):
-    """Retrieves student profile by email."""
-    student = db.query(StudentProfile).filter(StudentProfile.email == email).first()
+def get_profile(
+    email: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Retrieves student profile by email. Enforces authenticated ownership."""
+    clean_email = email.strip().lower()
+    if current_user.role != "admin" and clean_email != current_user.email.strip().lower():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: You can only access your own student profile."
+        )
+
+    student = db.query(StudentProfile).filter(StudentProfile.email == clean_email).first()
     if not student:
-        raise HTTPException(status_code=404, detail="Student profile not found.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student profile not found.")
     return student
 
 @router.delete("/profile/{email}", status_code=status.HTTP_200_OK)
-def delete_profile(email: str, db: Session = Depends(get_db)):
-    """Deletes student profile and all associated application data (Privacy & Data Protection compliance)."""
-    student = db.query(StudentProfile).filter(StudentProfile.email == email).first()
+def delete_profile(
+    email: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Deletes student profile and all associated application data. Enforces authenticated ownership."""
+    clean_email = email.strip().lower()
+    if current_user.role != "admin" and clean_email != current_user.email.strip().lower():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: You can only delete your own student profile."
+        )
+
+    student = db.query(StudentProfile).filter(StudentProfile.email == clean_email).first()
     if not student:
-        raise HTTPException(status_code=404, detail="Student profile not found.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student profile not found.")
     db.delete(student)
     db.commit()
     return {"status": "success", "message": f"Student profile {email} and all tracked records deleted."}
 
 # -------------------------------------------------------------
-# 3. Application Tracking & Checklist APIs
+# 3. Application Tracking & Checklist APIs (Secured with JWT)
 # -------------------------------------------------------------
 @router.post("/tracker/save", status_code=status.HTTP_201_CREATED)
-def save_opportunity_to_tracker(payload: TrackApplicationRequest, db: Session = Depends(get_db)):
+def save_opportunity_to_tracker(
+    payload: TrackApplicationRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
-    Saves an opportunity into the student's personal application tracker,
+    Saves an opportunity into the authenticated student's personal application tracker,
     and automatically initializes the verified application checklist.
     """
+    student = resolve_student_for_user(current_user, db, requested_student_id=payload.student_id)
+
     opp = db.query(Opportunity).filter(Opportunity.id == payload.opportunity_id).first()
     if not opp:
-        raise HTTPException(status_code=404, detail=f"Opportunity '{payload.opportunity_id}' not found.")
-
-    student = db.query(StudentProfile).filter(StudentProfile.id == payload.student_id).first()
-    if not student:
-        raise HTTPException(status_code=404, detail=f"Student ID '{payload.student_id}' not found.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Opportunity '{payload.opportunity_id}' not found.")
 
     existing = db.query(TrackedApplication).filter(
-        TrackedApplication.student_id == payload.student_id,
+        TrackedApplication.student_id == student.id,
         TrackedApplication.opportunity_id == payload.opportunity_id
     ).first()
 
@@ -268,7 +363,7 @@ def save_opportunity_to_tracker(payload: TrackApplicationRequest, db: Session = 
         return {"status": "already_tracked", "tracked_application_id": existing.id}
 
     tracked_app = TrackedApplication(
-        student_id=payload.student_id,
+        student_id=student.id,
         opportunity_id=payload.opportunity_id,
         stage=payload.stage or "Saved",
         notes=payload.notes
@@ -300,44 +395,85 @@ def save_opportunity_to_tracker(payload: TrackApplicationRequest, db: Session = 
     }
 
 @router.delete("/tracker/{student_id}/{opportunity_id}", status_code=status.HTTP_200_OK)
-def remove_saved_opportunity(student_id: str, opportunity_id: str, db: Session = Depends(get_db)):
+def remove_saved_opportunity(
+    student_id: str,
+    opportunity_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """Removes a saved opportunity and associated checklists from the student tracker."""
+    student = resolve_student_for_user(current_user, db, requested_student_id=student_id)
+
     tracked_app = db.query(TrackedApplication).filter(
-        TrackedApplication.student_id == student_id,
+        TrackedApplication.student_id == student.id,
         TrackedApplication.opportunity_id == opportunity_id
     ).first()
     if not tracked_app:
-        raise HTTPException(status_code=404, detail="Tracked opportunity not found.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tracked opportunity not found.")
     db.delete(tracked_app)
     db.commit()
     return {"status": "success", "message": "Opportunity removed from tracker."}
 
 @router.get("/tracker/{student_id}", response_model=List[TrackedApplicationResponse])
-def get_student_applications(student_id: str, db: Session = Depends(get_db)):
+def get_student_applications(
+    student_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """Lists all tracked opportunities, stages, and checklist progress for a student."""
-    apps = db.query(TrackedApplication).filter(TrackedApplication.student_id == student_id).all()
+    student = resolve_student_for_user(current_user, db, requested_student_id=student_id)
+    apps = db.query(TrackedApplication).filter(TrackedApplication.student_id == student.id).all()
     return apps
 
 @router.patch("/tracker/{tracked_app_id}/stage")
-def update_application_stage(tracked_app_id: str, new_stage: str, db: Session = Depends(get_db)):
+def update_application_stage(
+    tracked_app_id: str,
+    new_stage: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """Updates application stage (e.g. Saved -> Drafting -> Submitted -> Interview)."""
     valid_stages = ["Saved", "Drafting", "Submitted", "Interview", "Accepted", "Rejected"]
     if new_stage not in valid_stages:
-        raise HTTPException(status_code=400, detail=f"Invalid stage '{new_stage}'. Must be one of: {valid_stages}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid stage '{new_stage}'. Must be one of: {valid_stages}")
 
     tracked_app = db.query(TrackedApplication).filter(TrackedApplication.id == tracked_app_id).first()
     if not tracked_app:
-        raise HTTPException(status_code=404, detail="Tracked application not found.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tracked application not found.")
+
+    # Ownership check
+    if current_user.role != "admin":
+        student = resolve_student_for_user(current_user, db)
+        if tracked_app.student_id != student.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: You cannot modify another student's application stage."
+            )
+
     tracked_app.stage = new_stage
     db.commit()
     return {"status": "success", "new_stage": tracked_app.stage}
 
 @router.post("/tracker/{tracked_app_id}/checklists", response_model=ChecklistItemResponse, status_code=status.HTTP_201_CREATED)
-def add_custom_checklist_item(tracked_app_id: str, payload: ChecklistItemCreate, db: Session = Depends(get_db)):
+def add_custom_checklist_item(
+    tracked_app_id: str,
+    payload: ChecklistItemCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """Adds a custom student task to a tracked application."""
     tracked_app = db.query(TrackedApplication).filter(TrackedApplication.id == tracked_app_id).first()
     if not tracked_app:
-        raise HTTPException(status_code=404, detail="Tracked application not found.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tracked application not found.")
+
+    # Ownership check
+    if current_user.role != "admin":
+        student = resolve_student_for_user(current_user, db)
+        if tracked_app.student_id != student.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: You cannot add checklist items to another student's application."
+            )
 
     item = ApplicationChecklist(
         tracked_application_id=tracked_app_id,
@@ -351,11 +487,24 @@ def add_custom_checklist_item(tracked_app_id: str, payload: ChecklistItemCreate,
     return item
 
 @router.patch("/checklists/{checklist_id}/toggle")
-def toggle_checklist_completion(checklist_id: str, db: Session = Depends(get_db)):
+def toggle_checklist_completion(
+    checklist_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """Toggles completion state of a checklist task."""
     item = db.query(ApplicationChecklist).filter(ApplicationChecklist.id == checklist_id).first()
     if not item:
-        raise HTTPException(status_code=404, detail="Checklist task not found.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Checklist task not found.")
+
+    # Ownership check via item.tracked_application
+    if current_user.role != "admin":
+        student = resolve_student_for_user(current_user, db)
+        if not item.tracked_application or item.tracked_application.student_id != student.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: You cannot toggle checklist tasks for another student's application."
+            )
 
     item.is_completed = not item.is_completed
     item.completed_at = datetime.utcnow() if item.is_completed else None
@@ -368,19 +517,38 @@ def toggle_checklist_completion(checklist_id: str, db: Session = Depends(get_db)
     }
 
 @router.delete("/checklists/{checklist_id}", status_code=status.HTTP_200_OK)
-def delete_checklist_item(checklist_id: str, db: Session = Depends(get_db)):
+def delete_checklist_item(
+    checklist_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """Deletes a checklist task."""
     item = db.query(ApplicationChecklist).filter(ApplicationChecklist.id == checklist_id).first()
     if not item:
-        raise HTTPException(status_code=404, detail="Checklist task not found.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Checklist task not found.")
+
+    # Ownership check via item.tracked_application
+    if current_user.role != "admin":
+        student = resolve_student_for_user(current_user, db)
+        if not item.tracked_application or item.tracked_application.student_id != student.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: You cannot delete checklist tasks for another student's application."
+            )
+
     db.delete(item)
     db.commit()
     return {"status": "success", "message": "Checklist task deleted."}
 
 @router.get("/tracker/{student_id}/stats", response_model=DashboardStatsResponse)
-def get_dashboard_stats(student_id: str, db: Session = Depends(get_db)):
+def get_dashboard_stats(
+    student_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """Returns aggregated dashboard metrics for application tracking and checklist completion."""
-    tracked_apps = db.query(TrackedApplication).filter(TrackedApplication.student_id == student_id).all()
+    student = resolve_student_for_user(current_user, db, requested_student_id=student_id)
+    tracked_apps = db.query(TrackedApplication).filter(TrackedApplication.student_id == student.id).all()
 
     total_saved = len(tracked_apps)
     in_progress = sum(1 for app in tracked_apps if app.stage in ["Drafting", "In_Progress"])

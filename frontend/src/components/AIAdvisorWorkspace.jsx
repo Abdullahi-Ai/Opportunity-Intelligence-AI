@@ -70,15 +70,24 @@ export default function AIAdvisorWorkspace({ student, user }) {
       if (!conversationId) return;
       try {
         const history = await api.getConversationHistory(conversationId);
-        if (isMounted && history && history.messages && history.messages.length > 0) {
-          const formatted = history.messages.map((m) => ({
-            role: m.sender === 'user' ? 'user' : 'assistant',
-            content: m.message_text,
-            citations: m.citations || [],
-            tool_calls: m.tool_calls || [],
-            intent: m.intent || null,
-          }));
-          setMessages(formatted);
+        if (isMounted && history && Array.isArray(history.messages)) {
+          if (history.messages.length === 0) {
+            setMessages([]);
+          } else {
+            const formatted = history.messages
+              .filter((m) => m && (m.content || m.message_text))
+              .map((m) => ({
+                id: m.id,
+                role: (m.role || m.sender || 'assistant') === 'user' ? 'user' : 'assistant',
+                content: m.content || m.message_text || '',
+                citations: Array.isArray(m.citations) ? m.citations : [],
+                tool_calls: Array.isArray(m.tool_calls) ? m.tool_calls : [],
+                intent: m.intent || null,
+                createdAt: m.created_at || null,
+              }));
+            setMessages(formatted);
+          }
+
           if (history.state?.student_memory) {
             setActiveMemory(history.state.student_memory);
           }

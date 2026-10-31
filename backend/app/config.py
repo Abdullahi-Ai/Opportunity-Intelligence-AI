@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     PORT: int = 8000
     HOST: str = "0.0.0.0"
+
+    # Development-only default secrets. In production (APP_ENV=production), startup will strictly fail
+    # if these default values are not overridden by secure environment variables.
     SECRET_KEY: str = "super_secret_development_key_not_for_production_32chars"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
     ADMIN_REGISTRATION_SECRET: str = "kenya_admin_secret_key_2026"
@@ -34,13 +37,51 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
     
     @model_validator(mode="after")
-    def resolve_paths(self):
-        # Ensure Chroma path is absolute anchored at BASE_DIR
+    def validate_production_secrets_and_paths(self):
+        # 1. Enforce production secret security
+        is_production = self.APP_ENV.lower() in ["production", "prod", "staging"]
+        insecure_secret_keys = {
+            "super_secret_development_key_not_for_production_32chars",
+            "change_this_to_a_secure_random_key_in_production",
+            "replace_with_a_secure_random_key_of_at_least_32_characters",
+            "secret",
+            "changeme",
+            "admin",
+            "123456"
+        }
+        insecure_admin_secrets = {
+            "kenya_admin_secret_key_2026",
+            "replace_with_a_secure_admin_registration_token_of_at_least_16_characters",
+            "admin_secret",
+            "secret",
+            "admin"
+        }
+
+        if is_production:
+            if not self.SECRET_KEY or self.SECRET_KEY in insecure_secret_keys:
+                raise ValueError(
+                    "CRITICAL SECURITY CONFIGURATION ERROR: SECRET_KEY must be set to a dedicated, cryptographically secure value in production. Development fallbacks are strictly prohibited."
+                )
+            if len(self.SECRET_KEY) < 32:
+                raise ValueError(
+                    "CRITICAL SECURITY CONFIGURATION ERROR: SECRET_KEY must be at least 32 characters in length for production environments."
+                )
+
+            if not self.ADMIN_REGISTRATION_SECRET or self.ADMIN_REGISTRATION_SECRET in insecure_admin_secrets:
+                raise ValueError(
+                    "CRITICAL SECURITY CONFIGURATION ERROR: ADMIN_REGISTRATION_SECRET must be set to a dedicated secure secret in production. Development fallbacks are strictly prohibited."
+                )
+            if len(self.ADMIN_REGISTRATION_SECRET) < 16:
+                raise ValueError(
+                    "CRITICAL SECURITY CONFIGURATION ERROR: ADMIN_REGISTRATION_SECRET must be at least 16 characters in length for production environments."
+                )
+
+        # 2. Ensure Chroma path is absolute anchored at BASE_DIR
         chroma_path = Path(self.CHROMA_PERSIST_DIRECTORY)
         if not chroma_path.is_absolute():
             self.CHROMA_PERSIST_DIRECTORY = str((BASE_DIR / chroma_path).resolve())
         
-        # Ensure SQLite path is absolute anchored at BASE_DIR
+        # 3. Ensure SQLite path is absolute anchored at BASE_DIR
         if self.DATABASE_URL.startswith("sqlite:///") and not self.DATABASE_URL.startswith("sqlite:////"):
             rel_part = self.DATABASE_URL.replace("sqlite:///", "")
             if rel_part.startswith("./"):

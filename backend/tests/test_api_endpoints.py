@@ -54,9 +54,29 @@ def test_opportunity_detail_endpoint():
     assert data["is_verified"] is True
 
 def test_student_lifecycle_and_tracking_flow():
-    test_email = "faith.chebet@students.ku.ac.ke"
+    import uuid
+    test_email = f"faith.chebet_{uuid.uuid4().hex[:8]}@students.ku.ac.ke"
 
-    # 1. Create Student Profile
+    # 0. Register student to obtain authenticated JWT
+    reg_payload = {
+        "email": test_email,
+        "password": "SecurePassword123!",
+        "full_name": "Faith Chebet",
+        "role": "student",
+        "university": "Kenyatta University",
+        "field_of_study": "Civil Engineering",
+        "degree_level": "Undergraduate",
+        "year_of_study": 1,
+        "graduation_year": 2029
+    }
+    reg_resp = client.post("/api/v1/auth/register", json=reg_payload)
+    assert reg_resp.status_code == 201
+    auth_data = reg_resp.json()
+    token = auth_data["access_token"]
+    auth_headers = {"Authorization": f"Bearer {token}"}
+    student_id = auth_data["user"]["student_profile"]["id"]
+
+    # 1. Update Student Profile
     profile_data = {
         "email": test_email,
         "full_name": "Faith Chebet",
@@ -69,11 +89,11 @@ def test_student_lifecycle_and_tracking_flow():
         "gpa_or_grade": "A-",
         "preferred_categories": "Scholarship, Bursary"
     }
-    resp = client.post("/api/v1/profile", json=profile_data)
+    resp = client.post("/api/v1/profile", json=profile_data, headers=auth_headers)
     assert resp.status_code == 201
     student = resp.json()
-    student_id = student["id"]
     assert student["email"] == test_email
+    assert student["county_of_origin"] == "Bomet"
 
     # 2. Save opportunity to tracker with auto-generated checklist
     opp_id = "opp-hef-undergraduate-2026"
@@ -84,12 +104,12 @@ def test_student_lifecycle_and_tracking_flow():
         "notes": "Chief endorsement letter requested.",
         "auto_generate_checklist": True
     }
-    resp_track = client.post("/api/v1/tracker/save", json=track_payload)
+    resp_track = client.post("/api/v1/tracker/save", json=track_payload, headers=auth_headers)
     assert resp_track.status_code == 201
     tracked_id = resp_track.json()["tracked_application_id"]
 
     # 3. Verify tracked applications and auto-populated checklists
-    resp_list = client.get(f"/api/v1/tracker/{student_id}")
+    resp_list = client.get(f"/api/v1/tracker/{student_id}", headers=auth_headers)
     assert resp_list.status_code == 200
     tracked_list = resp_list.json()
     assert len(tracked_list) == 1
@@ -101,7 +121,7 @@ def test_student_lifecycle_and_tracking_flow():
     assert first_task["is_completed"] is False
 
     # 4. Toggle checklist task completion
-    resp_toggle = client.patch(f"/api/v1/checklists/{task_id}/toggle")
+    resp_toggle = client.patch(f"/api/v1/checklists/{task_id}/toggle", headers=auth_headers)
     assert resp_toggle.status_code == 200
     assert resp_toggle.json()["is_completed"] is True
     assert resp_toggle.json()["completed_at"] is not None
@@ -111,12 +131,12 @@ def test_student_lifecycle_and_tracking_flow():
         "task_description": "Visit Equity Bank Kericho branch for stamped statement",
         "required_document_type": "Bank Statement"
     }
-    resp_custom = client.post(f"/api/v1/tracker/{tracked_id}/checklists", json=custom_task_payload)
+    resp_custom = client.post(f"/api/v1/tracker/{tracked_id}/checklists", json=custom_task_payload, headers=auth_headers)
     assert resp_custom.status_code == 201
     custom_task_id = resp_custom.json()["id"]
 
     # 6. Check dashboard stats
-    resp_stats = client.get(f"/api/v1/tracker/{student_id}/stats")
+    resp_stats = client.get(f"/api/v1/tracker/{student_id}/stats", headers=auth_headers)
     assert resp_stats.status_code == 200
     stats = resp_stats.json()
     assert stats["total_saved"] == 1
@@ -125,22 +145,22 @@ def test_student_lifecycle_and_tracking_flow():
     assert stats["checklist_completion_rate"] > 0
 
     # 7. Update application stage
-    resp_stage = client.patch(f"/api/v1/tracker/{tracked_id}/stage?new_stage=Drafting")
+    resp_stage = client.patch(f"/api/v1/tracker/{tracked_id}/stage?new_stage=Drafting", headers=auth_headers)
     assert resp_stage.status_code == 200
     assert resp_stage.json()["new_stage"] == "Drafting"
 
     # 8. Delete custom task
-    resp_del_task = client.delete(f"/api/v1/checklists/{custom_task_id}")
+    resp_del_task = client.delete(f"/api/v1/checklists/{custom_task_id}", headers=auth_headers)
     assert resp_del_task.status_code == 200
 
     # 9. Remove opportunity from tracker
-    resp_remove = client.delete(f"/api/v1/tracker/{student_id}/{opp_id}")
+    resp_remove = client.delete(f"/api/v1/tracker/{student_id}/{opp_id}", headers=auth_headers)
     assert resp_remove.status_code == 200
 
     # 10. Delete student profile (Privacy compliance)
-    resp_del_profile = client.delete(f"/api/v1/profile/{test_email}")
+    resp_del_profile = client.delete(f"/api/v1/profile/{test_email}", headers=auth_headers)
     assert resp_del_profile.status_code == 200
 
     # Verify profile is deleted
-    resp_check = client.get(f"/api/v1/profile/{test_email}")
+    resp_check = client.get(f"/api/v1/profile/{test_email}", headers=auth_headers)
     assert resp_check.status_code == 404

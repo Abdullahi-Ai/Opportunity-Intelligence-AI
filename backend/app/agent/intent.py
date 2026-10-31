@@ -31,32 +31,71 @@ class IntentType(str, Enum):
 
 # Keywords associated with known verified providers in Kenya
 KNOWN_PROVIDERS = {
+    # 1. Safaricom PLC
     "safaricom": "opp-safaricom-attachment-2026",
     "safaricom attachment": "opp-safaricom-attachment-2026",
     "safaricom internship": "opp-safaricom-attachment-2026",
-    "safaricom graduate": "opp-safaricom-gt-2026",
-    "kra": "opp-kra-gt-2026",
-    "kenya revenue authority": "opp-kra-gt-2026",
+    "safaricom graduate": "opp-safaricom-discover-gt-2026",
+    "safaricom discover": "opp-safaricom-discover-gt-2026",
+    "discover graduate": "opp-safaricom-discover-gt-2026",
+
+    # 2. Kenya Revenue Authority (KRA)
+    "kra": "opp-kra-internship-2026",
+    "kenya revenue authority": "opp-kra-internship-2026",
+    "kra internship": "opp-kra-internship-2026",
+
+    # 3. Higher Education Financing (HEF / HELB)
     "hef": "opp-hef-undergraduate-2026",
     "higher education financing": "opp-hef-undergraduate-2026",
     "helb": "opp-hef-undergraduate-2026",
-    "chevening": "opp-chevening-kenya-2026",
-    "daad": "opp-daad-postgraduate-2026",
-    "equity": "opp-equity-elp-2026",
-    "equity leaders": "opp-equity-elp-2026",
-    "elp": "opp-equity-elp-2026",
-    "wings to fly": "opp-equity-elp-2026",
-    "kcb": "opp-kcb-2jiajiri-2026",
-    "2jiajiri": "opp-kcb-2jiajiri-2026",
-    "mawazo": "opp-mawazo-fellowship-2026",
+
+    # 4. Chevening Scholarships (UK FCDO)
+    "chevening": "opp-chevening-kenya-2027",
+    "chevening scholarship": "opp-chevening-kenya-2027",
+    "chevening kenya": "opp-chevening-kenya-2027",
+
+    # 5. DAAD Eastern Africa
+    "daad": "opp-daad-region-kenya-2027",
+    "daad scholarship": "opp-daad-region-kenya-2027",
+
+    # 6. Equity Group Foundation (ELP)
+    "equity": "opp-equity-leaders-elp-2026",
+    "equity leaders": "opp-equity-leaders-elp-2026",
+    "elp": "opp-equity-leaders-elp-2026",
+    "wings to fly": "opp-equity-leaders-elp-2026",
+
+    # 7. KCB Foundation
+    "kcb": "opp-kcb-foundation-tertiary-2026",
+    "2jiajiri": "opp-kcb-foundation-tertiary-2026",
+    "kcb foundation": "opp-kcb-foundation-tertiary-2026",
+
+    # 8. Mawazo Institute
+    "mawazo": "opp-mawazo-fellowship-2027",
+    "mawazo institute": "opp-mawazo-fellowship-2027",
+    "mawazo fellowship": "opp-mawazo-fellowship-2027",
+
+    # 9. Hult Prize
     "hult prize": "opp-hult-prize-kenya-2026",
+
+    # 10. United Nations Gigiri (UNON)
     "un gigiri": "opp-un-gigiri-internship-2026",
     "united nations": "opp-un-gigiri-internship-2026",
-    "pdtp": "opp-pdtp-internship-2026",
-    "presidential digital": "opp-pdtp-internship-2026",
-    "psip": "opp-psc-psip-2026",
-    "public service": "opp-psc-psip-2026",
-    "mastercard": "opp-mastercard-foundation-usiu-2026"
+
+    # 11. Presidential Digital Talent Programme (PDTP)
+    "pdtp": "opp-pdtp-digika-2026",
+    "presidential digital": "opp-pdtp-digika-2026",
+    "digika": "opp-pdtp-digika-2026",
+    "presidential digital talent": "opp-pdtp-digika-2026",
+
+    # 12. Public Service Commission (PSC PSIP)
+    "psip": "opp-psc-psip-internship-2026",
+    "public service": "opp-psc-psip-internship-2026",
+    "public service commission": "opp-psc-psip-internship-2026",
+    "psip internship": "opp-psc-psip-internship-2026",
+
+    # 13. Mastercard Foundation & USIU-Africa
+    "mastercard": "opp-mastercard-fdn-usiu-2026",
+    "mastercard foundation": "opp-mastercard-fdn-usiu-2026"
 }
 
 def extract_entities(text: str) -> Dict[str, Any]:
