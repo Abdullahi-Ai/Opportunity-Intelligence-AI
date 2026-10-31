@@ -13,6 +13,7 @@ from app.db.session import get_db
 from app.models.entities import User, StudentProfile
 from app.core.security import verify_password, get_password_hash, create_access_token
 from app.core.auth import get_current_user
+from app.core.rate_limit import limiter_auth
 
 router = APIRouter(prefix="/api/v1/auth", tags=["Authentication & Access Control"])
 
@@ -53,7 +54,7 @@ class AuthResponse(BaseModel):
     token_type: str = "bearer"
     user: UserResponse
 
-@router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(limiter_auth)])
 def register(payload: UserRegisterRequest, db: Session = Depends(get_db)):
     """Register a new student or verified administrator account."""
     clean_email = payload.email.strip().lower()
@@ -138,7 +139,7 @@ def register(payload: UserRegisterRequest, db: Session = Depends(get_db)):
         )
     )
 
-@router.post("/login", response_model=AuthResponse)
+@router.post("/login", response_model=AuthResponse, dependencies=[Depends(limiter_auth)])
 def login(payload: UserLoginRequest, db: Session = Depends(get_db)):
     """Authenticate with email and password to receive a JWT access token."""
     clean_email = payload.email.strip().lower()

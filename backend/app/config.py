@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = f"sqlite:///{BASE_DIR}/data/app.db"
     
     ALLOWED_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
+    RATE_LIMITING_ENABLED: bool = True
     
     @model_validator(mode="after")
     def validate_production_secrets_and_paths(self):

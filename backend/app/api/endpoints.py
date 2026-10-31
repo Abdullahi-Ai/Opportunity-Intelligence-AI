@@ -581,7 +581,7 @@ def update_application_stage(
 
     tracked_app.stage = new_stage
     db.commit()
-    return {"status": "success", "new_stage": tracked_app.stage}
+    return {"status": "success", "new_stage": tracked_app.stage, "stage": tracked_app.stage}
 
 @router.post("/tracker/{tracked_app_id}/checklists", response_model=ChecklistItemResponse, status_code=status.HTTP_201_CREATED)
 def add_custom_checklist_item(

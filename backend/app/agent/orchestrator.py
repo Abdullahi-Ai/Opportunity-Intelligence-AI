@@ -154,12 +154,12 @@ class AgentOrchestrator:
         ]
 
         history: List[Dict[str, str]] = []
-        if conversation_id in SESSION_CONTEXT_CACHE:
-            history = SESSION_CONTEXT_CACHE[conversation_id][-6:]
-        elif db:
+        if db:
             db_history = load_message_history(db, conversation_id)
             for m in db_history[-6:]:
                 history.append({"role": m.get("role", "user"), "content": m.get("content", "")})
+        elif conversation_id in SESSION_CONTEXT_CACHE:
+            history = SESSION_CONTEXT_CACHE[conversation_id][-6:]
 
         for h in history:
             if h.get("content"):

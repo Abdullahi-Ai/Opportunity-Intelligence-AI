@@ -51,4 +51,7 @@ class RobustEmbeddingFunction(EmbeddingFunction[Documents]):
         else:
             raise RuntimeError("No compatible embedding engine found.")
 
+    def name(self) -> str:
+        return "all-MiniLM-L6-v2"
+
 embedding_function = RobustEmbeddingFunction()

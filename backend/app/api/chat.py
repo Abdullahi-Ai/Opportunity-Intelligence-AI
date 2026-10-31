@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.entities import StudentProfile, User, Conversation
 from app.core.auth import get_optional_user
+from app.core.rate_limit import limiter_chat
 from app.agent.orchestrator import agent_orchestrator
 from app.agent.memory import (
     get_or_create_conversation,
@@ -49,7 +50,7 @@ class ChatResponse(BaseModel):
 class RenameConversationRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
 
-@router.post("/chat", response_model=ChatResponse)
+@router.post("/chat", response_model=ChatResponse, dependencies=[Depends(limiter_chat)])
 def chat_with_assistant(
     payload: ChatMessageRequest,
     current_user: Optional[User] = Depends(get_optional_user),
