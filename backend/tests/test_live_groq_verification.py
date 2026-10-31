@@ -6,7 +6,7 @@ from app.config import settings
 from app.agent.orchestrator import AgentOrchestrator
 from app.agent.tools import tool_search_opportunities, SearchOpportunitiesInput
 
-LIVE_KEY = os.getenv("GROQ_API_KEY", "")
+LIVE_KEY = os.getenv("GROQ_API_KEY", "") or settings.GROQ_API_KEY
 HAS_VALID_GROQ_KEY = bool(LIVE_KEY and LIVE_KEY != "your_groq_api_key_here" and len(LIVE_KEY) > 10)
 
 def make_choice(content=None, tool_calls=None):

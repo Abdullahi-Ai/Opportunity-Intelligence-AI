@@ -1,153 +1,156 @@
 # Opportunity Intelligence AI — Production Deployment Guide
 
-This guide details the production architecture, PostgreSQL migration pipeline, persistent memory, vector database configuration, security policies, and startup instructions for **Opportunity Intelligence AI**.
+This guide details the complete production architecture, deployment workflows, database migrations, and operational maintenance for **Opportunity Intelligence AI**.
 
 ---
 
-## 1. Environment Architecture & Variables
+## 1. System Architecture Diagram
 
-Create a dedicated `.env` file in the `backend/` directory based on the following production specification:
+```mermaid
+flowchart TD
+    subgraph Client["Frontend Layer (Vercel)"]
+        UI["React 18 + Vite SPA"]
+        Tailwind["TailwindCSS + Lucide Icons"]
+    end
 
-```bash
-# Application Environment
-APP_NAME="Opportunity Intelligence AI"
-APP_ENV=production
-DEBUG=false
-HOST=0.0.0.0
-PORT=8000
+    subgraph Hosting["Backend Layer (Railway)"]
+        FastAPI["FastAPI Gateway (Uvicorn - 1 Worker)"]
+        RateLimiter["In-Memory Rate Limiter"]
+        Orchestrator["Agentic Orchestrator & Tool Dispatcher"]
+        Chroma["ChromaDB Vector Store (Persistent Volume /data)"]
+    end
 
-# Cryptographic Secrets (Minimum 32 characters for SECRET_KEY, 16 for ADMIN_SECRET)
-SECRET_KEY=generate_cryptographically_secure_random_key_min_32_chars_long
-ADMIN_REGISTRATION_SECRET=generate_strong_admin_secret_token_16_chars_min
-ACCESS_TOKEN_EXPIRE_MINUTES=10080
+    subgraph DataLayer["Managed Data & Cloud AI"]
+        Neon["Neon Managed PostgreSQL (Pooled & Direct Connection)"]
+        Groq["Groq Cloud API (Llama 3.3 70B Versatile)"]
+    end
 
-# Database Configuration (PostgreSQL with Connection Pooling)
-DATABASE_URL=postgresql://opportunity_user:secure_pg_password@localhost:5432/opportunity_db
-
-# LLM Agent Configuration
-GROQ_API_KEY=gsk_your_production_groq_api_key_here
-GROQ_MODEL=llama-3.3-70b-versatile
-
-# ChromaDB Vector Storage Configuration
-CHROMA_PERSIST_DIRECTORY=/var/lib/opportunity-ai/chromadb_prod
-CHROMA_COLLECTION_NAME=kenya_opportunities
-EMBEDDING_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
-
-# API Security & Rate Limiting
-RATE_LIMITING_ENABLED=true
-ALLOWED_ORIGINS=https://opportunities.ac.ke,https://admin.opportunities.ac.ke
+    UI -->|"HTTPS REST API / JSON"| FastAPI
+    FastAPI --> RateLimiter
+    RateLimiter --> Orchestrator
+    Orchestrator -->|"Semantic Search / Embeddings"| Chroma
+    Orchestrator -->|"Function / Tool Calling"| Groq
+    FastAPI -->|"SQLAlchemy ORM (Pooled Port 5432)"| Neon
+    FastAPI -->|"Alembic Migrations (Direct Endpoint)"| Neon
 ```
 
 ---
 
-## 2. PostgreSQL Setup & Connection Pooling
+## 2. Environment Variables Specification
 
-### Database Provisioning
-```bash
-sudo -u postgres psql -c "CREATE USER opportunity_user WITH PASSWORD 'secure_pg_password';"
-sudo -u postgres psql -c "CREATE DATABASE opportunity_db OWNER opportunity_user;"
-sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE opportunity_db TO opportunity_user;"
-```
+### Backend (Railway Secret Management)
+| Variable | Value / Description | Sensitive |
+| :--- | :--- | :--- |
+| `APP_ENV` | `production` | No |
+| `DEBUG` | `false` | No |
+| `HOST` | `0.0.0.0` | No |
+| `PORT` | `8000` (Assigned by Railway) | No |
+| `SECRET_KEY` | Dedicated 64-character hex cryptographic string | **YES** |
+| `ADMIN_REGISTRATION_SECRET` | Dedicated 32-character token for admin account creation | **YES** |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `10080` (7 days) | No |
+| `DATABASE_URL` | Neon pooled URL: `postgresql://user:password@ep-xyz-pooler.region.neon.tech/neondb?sslmode=require` | **YES** |
+| `GROQ_API_KEY` | Production Groq API key: `gsk_...` | **YES** |
+| `GROQ_MODEL` | `llama-3.3-70b-versatile` | No |
+| `CHROMA_PERSIST_DIRECTORY` | `/data/chromadb` (Mounted persistent volume) | No |
+| `CHROMA_COLLECTION_NAME` | `kenya_opportunities` | No |
+| `EMBEDDING_MODEL_NAME` | `sentence-transformers/all-MiniLM-L6-v2` | No |
+| `RATE_LIMITING_ENABLED` | `true` | No |
+| `ALLOWED_ORIGINS` | `https://your-app.vercel.app,https://opportunities.ac.ke` | No |
+
+### Frontend (Vercel Project Settings)
+| Variable | Value / Description |
+| :--- | :--- |
+| `VITE_API_URL` | Railway backend public URL: `https://your-backend.up.railway.app` |
+
+---
+
+## 3. Neon PostgreSQL Configuration
+
+### Dual-Endpoint Strategy
+Neon provides two connection strings:
+1. **Application Connection (Pooled):**
+   - Format: `postgresql://[user]:[password]@ep-[name]-pooler.[region].neon.tech/neondb?sslmode=require`
+   - Purpose: Used by FastAPI runtime for low-latency, pooled database queries.
+2. **Migration Connection (Direct):**
+   - Format: `postgresql://[user]:[password]@ep-[name].[region].neon.tech/neondb?sslmode=require`
+   - Purpose: Used by Alembic for DDL operations (`05a08e706193`).
+   - The Alembic configuration in `backend/alembic/env.py` automatically normalizes `-pooler.` URLs to direct endpoints during migration runs.
 
 ### Connection Pool Specification
-When running with PostgreSQL (`DATABASE_URL=postgresql://...`), SQLAlchemy engine initializes with:
-- **Pool Size:** `10` persistent connections
-- **Max Overflow:** `20` burst connections
-- **Pool Pre-Ping:** `True` (verifies connection health before checkout)
-- **Pool Recycle:** `300` seconds (prevents stale database drops)
+When running with PostgreSQL:
+- **Pool Size:** `10`
+- **Max Overflow:** `20`
+- **Pool Pre-Ping:** `True` (verifies connection validity before each checkout)
+- **Pool Recycle:** `300` seconds (avoids silent disconnections from cloud proxies)
 
 ---
 
-## 3. Alembic Database Migration Commands
+## 4. Railway Backend Deployment
 
-Apply all schema versions up to head:
+### Configuration Files
+- **[`railway.json`](file:///home/osama/Opportunity-Intelligence-AI/railway.json):**
+  Defines buildpack (`NIXPACKS`), health check (`/api/v1/health`), and production startup command:
+  ```bash
+  cd backend && alembic upgrade head && python -m app.rag.reindex && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1
+  ```
+- **[`backend/Procfile`](file:///home/osama/Opportunity-Intelligence-AI/backend/Procfile):**
+  ```bash
+  web: alembic upgrade head && python -m app.rag.reindex && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1
+  ```
 
-```bash
-cd backend
-source venv/bin/activate
-
-# Check current revision status
-alembic current
-
-# Execute all pending migrations up to latest head
-alembic upgrade head
-
-# Rollback single migration if necessary
-alembic downgrade -1
-```
+### Storage Volume Mount
+Attach a Railway persistent volume mounted at `/data` to preserve indexed ChromaDB embeddings and prevent index loss on deploy restarts.
 
 ---
 
-## 4. ChromaDB Vector Knowledge Ingestion & Backup
+## 5. Vercel Frontend Deployment
 
-### Initial Ingestion / Re-indexing
-```bash
-cd backend
-source venv/bin/activate
-
-# Execute idempotent document chunking and vector indexing
-python -m app.rag.reindex
+### Configuration File ([`frontend/vercel.json`](file:///home/osama/Opportunity-Intelligence-AI/frontend/vercel.json))
+```json
+{
+  "framework": "vite",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
 ```
 
-### Snapshot & Backup Procedure
-```bash
-python -c "from app.rag.reindex import backup_chroma_db; print('Backup saved at:', backup_chroma_db('/var/backups/chromadb'))"
-```
-
----
-
-## 5. Frontend Production Build
-
+### Build Verification
 ```bash
 cd frontend
 npm install --frozen-lockfile
 npm run build
 ```
 
-The resulting `frontend/dist/` directory contains minified static bundles ready for reverse-proxy serving via NGINX or Caddy.
-
 ---
 
-## 6. Service Supervision & Startup
+## 6. Migration, Backup & Health Monitoring
 
-### Backend Service (Systemd Configuration)
-Create `/etc/systemd/system/opportunity-backend.service`:
-
-```ini
-[Unit]
-Description=Opportunity Intelligence AI Backend Service
-After=network.target postgresql.service
-
-[Service]
-User=www-data
-Group=www-data
-WorkingDirectory=/var/www/opportunity-ai/backend
-Environment="PATH=/var/www/opportunity-ai/backend/venv/bin"
-ExecStart=/var/www/opportunity-ai/backend/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
-
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable and start the service:
+### Alembic Migration Command
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable opportunity-backend
-sudo systemctl start opportunity-backend
+cd backend
+venv/bin/alembic upgrade head
 ```
 
----
-
-## 7. Health Check, Monitoring & Log Audits
-
-### Automated Health Verification
+### ChromaDB Backup & Ingestion
 ```bash
-curl -f http://localhost:8000/api/v1/health
+# Force fresh re-indexing of raw opportunities:
+cd backend && python -m app.rag.reindex
+
+# Generate snapshot backup:
+python -c "from app.rag.reindex import backup_chroma_db; print(backup_chroma_db('/data/backups'))"
 ```
-Expected output:
+
+### Health Check Verification
+```bash
+curl -f https://your-backend.up.railway.app/api/v1/health
+```
+Response:
 ```json
 {
   "status": "healthy",
@@ -159,8 +162,3 @@ Expected output:
   "model": "llama-3.3-70b-versatile"
 }
 ```
-
-### Rate Limiting Limits
-- **Authentication (`/api/v1/auth/login`, `/register`):** 5 requests / 60 seconds per IP.
-- **Conversational AI (`/api/v1/chat`):** 20 requests / 60 seconds per user / IP.
-- **Discovery (`/api/v1/opportunities`, `/matches`, `/tracker`):** 60 requests / 60 seconds.
