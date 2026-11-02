@@ -7,6 +7,8 @@ Implements strictly typed Pydantic tools for:
 4. Actionable application checklist generation.
 """
 
+import logging
+import re
 from typing import Dict, List, Any, Optional
 from datetime import date, datetime
 from pydantic import BaseModel, Field
@@ -14,45 +16,172 @@ from sqlalchemy.orm import Session
 
 from app.rag import get_vector_store
 
+logger = logging.getLogger(__name__)
+
 class SearchOpportunitiesInput(BaseModel):
     query: str = Field(description="Natural language search query for scholarships, internships, or requirements.")
     category: Optional[str] = Field(default=None, description="Optional category filter: Scholarship, Internship, Graduate Trainee, Fellowship, Competition")
     top_k: int = Field(default=4, ge=1, le=10, description="Number of results to retrieve.")
 
-def tool_search_opportunities(input_data: SearchOpportunitiesInput) -> Dict[str, Any]:
-    """Retrieves grounded opportunity chunks and official source links from verified vector store."""
-    results = get_vector_store().search(
-        query=input_data.query,
-        top_k=input_data.top_k,
-        category=input_data.category
-    )
+def _search_opportunities_relational_fallback(
+    query: str,
+    category: Optional[str] = None,
+    top_k: int = 4,
+    db: Optional[Session] = None
+) -> List[Dict[str, Any]]:
+    """
+    Executes a deterministic SQL keyword search across verified opportunities
+    when semantic vector retrieval is unavailable.
+    Preserves verified official metadata, sources, and deadline dates.
+    """
+    from app.models.entities import Opportunity
+    from app.db.session import SessionLocal
+
+    session = db
+    close_session = False
+    if session is None:
+        session = SessionLocal()
+        close_session = True
+
+    try:
+        base_query = session.query(Opportunity).filter(
+            Opportunity.is_verified == True,
+            Opportunity.status == "open"
+        )
+        if category:
+            base_query = base_query.filter(Opportunity.category.ilike(f"%{category.strip()}%"))
+
+        candidates = base_query.all()
+        if not candidates:
+            return []
+
+        # Tokenize query to identify distinctive keywords (ignoring noise/common terms)
+        stopwords = {
+            "a", "an", "the", "and", "or", "in", "on", "at", "to", "for", "of", "with",
+            "is", "are", "me", "my", "i", "what", "find", "show", "search", "give",
+            "opportunity", "opportunities", "kenya", "kenyan", "student", "students",
+            "university", "programme", "programmes", "program", "programs"
+        }
+        tokens = [t.lower() for t in re.findall(r'\b[a-zA-Z0-9_\-]{3,}\b', query) if t.lower() not in stopwords]
+
+        scored_candidates = []
+        for opp in candidates:
+            score = 0.0
+            searchable_text = " ".join([
+                opp.title or "",
+                opp.provider or "",
+                opp.category or "",
+                opp.fields_of_study or "",
+                opp.target_audience or "",
+                opp.source_notes or ""
+            ]).lower()
+
+            for token in tokens:
+                if token in (opp.title or "").lower():
+                    score += 0.4
+                elif token in (opp.provider or "").lower():
+                    score += 0.3
+                elif token in searchable_text:
+                    score += 0.2
+
+            if not tokens or score > 0:
+                normalized_score = min(0.95, max(0.50, round(score, 2))) if tokens else 0.70
+                scored_candidates.append((opp, normalized_score))
+
+        # Sort by relevance score descending, then by creation date
+        scored_candidates.sort(key=lambda x: (x[1], x[0].created_at or datetime.min), reverse=True)
+
+        results = []
+        for opp, sim_score in scored_candidates[:top_k]:
+            excerpt = f"{opp.title} by {opp.provider}. Target: {opp.target_audience or 'Kenyan university students'}. Notes: {opp.source_notes or 'Official opportunity.'}"
+            results.append({
+                "opportunity_id": opp.id,
+                "title": opp.title,
+                "provider": opp.provider,
+                "category": opp.category,
+                "section": "Overview & Eligibility",
+                "deadline": opp.application_deadline,
+                "published_deadline": opp.application_deadline,
+                "official_url": opp.official_url,
+                "verification_status": "verified" if opp.is_verified else "unverified",
+                "degree_levels": opp.degree_levels,
+                "fields_of_study": opp.fields_of_study,
+                "content_excerpt": excerpt,
+                "similarity_score": sim_score,
+                "retrieval_mode": "relational_fallback"
+            })
+        return results
+    finally:
+        if close_session and session is not None:
+            session.close()
+
+def tool_search_opportunities(
+    input_data: SearchOpportunitiesInput,
+    db: Optional[Session] = None
+) -> Dict[str, Any]:
+    """Retrieves grounded opportunity chunks and official source links from verified vector store,
+    with automatic graceful relational fallback if vector retrieval fails.
+    """
+    results = None
+    retrieval_mode = "vector_semantic"
+
+    try:
+        raw_vector_results = get_vector_store().search(
+            query=input_data.query,
+            top_k=input_data.top_k,
+            category=input_data.category
+        )
+        if raw_vector_results:
+            results = [
+                {
+                    "opportunity_id": r["metadata"].get("opportunity_id"),
+                    "title": r["metadata"].get("title"),
+                    "provider": r["metadata"].get("provider"),
+                    "category": r["metadata"].get("category"),
+                    "section": r["metadata"].get("section_title"),
+                    "deadline": r["metadata"].get("application_deadline"),
+                    "published_deadline": r["metadata"].get("application_deadline"),
+                    "official_url": r["metadata"].get("official_url"),
+                    "verification_status": r["metadata"].get("verification_status", "verified"),
+                    "degree_levels": r["metadata"].get("degree_levels"),
+                    "fields_of_study": r["metadata"].get("fields_of_study"),
+                    "content_excerpt": r.get("content", ""),
+                    "similarity_score": r.get("similarity_score", 0.0),
+                    "retrieval_mode": "vector_semantic"
+                }
+                for r in raw_vector_results
+            ]
+        else:
+            results = []
+    except Exception as exc:
+        safe_exc = re.sub(r'password=[^ &]+', 'password=***', str(exc))
+        safe_exc = re.sub(r':\/\/[^:]+:[^@]+@', '://***:***@', safe_exc)
+        logger.warning(
+            "Vector retrieval failed (%s: %s). Executing graceful relational fallback.",
+            type(exc).__name__,
+            safe_exc
+        )
+        retrieval_mode = "relational_fallback"
+        results = _search_opportunities_relational_fallback(
+            query=input_data.query,
+            category=input_data.category,
+            top_k=input_data.top_k,
+            db=db
+        )
+
     if not results:
         return {
             "status": "not_found",
+            "retrieval_mode": retrieval_mode,
             "message": "No matching verified opportunities found in knowledge base.",
             "results": []
         }
+
     return {
         "status": "success",
+        "retrieval_mode": retrieval_mode,
         "count": len(results),
-        "results": [
-            {
-                "opportunity_id": r["metadata"].get("opportunity_id"),
-                "title": r["metadata"].get("title"),
-                "provider": r["metadata"].get("provider"),
-                "category": r["metadata"].get("category"),
-                "section": r["metadata"].get("section_title"),
-                "deadline": r["metadata"].get("application_deadline"),
-                "published_deadline": r["metadata"].get("application_deadline"),
-                "official_url": r["metadata"].get("official_url"),
-                "verification_status": r["metadata"].get("verification_status", "verified"),
-                "degree_levels": r["metadata"].get("degree_levels"),
-                "fields_of_study": r["metadata"].get("fields_of_study"),
-                "content_excerpt": r["content"],
-                "similarity_score": r["similarity_score"]
-            }
-            for r in results
-        ]
+        "results": results
     }
 
 class DeadlineCountdownInput(BaseModel):
@@ -151,21 +280,57 @@ class AssessEligibilityInput(BaseModel):
     student_year_of_study: int = Field(description="Current year of study e.g. 1, 2, 3, 4")
     student_kcse_grade: Optional[str] = Field(default=None, description="e.g. 'A', 'B+', 'B', 'B-'")
 
-def tool_assess_eligibility(input_data: AssessEligibilityInput) -> Dict[str, Any]:
+def tool_assess_eligibility(input_data: AssessEligibilityInput, db: Optional[Session] = None) -> Dict[str, Any]:
     """
     Evaluates published opportunity criteria against student parameters.
     Returns criteria breakdown classified as Meets, Does Not Meet, or Needs Verification.
     """
-    results = get_vector_store().search(
-        query=f"{input_data.opportunity_id} eligibility criteria minimum requirements",
-        top_k=2
-    )
+    results = []
+    try:
+        results = get_vector_store().search(
+            query=f"{input_data.opportunity_id} eligibility criteria minimum requirements",
+            top_k=2
+        )
+    except Exception as exc:
+        logger.warning(
+            "Vector retrieval for eligibility assessment failed (%s: %s). Checking relational database fallback.",
+            type(exc).__name__,
+            str(exc)
+        )
 
     matching_chunk = None
     for r in results:
         if r["metadata"].get("opportunity_id") == input_data.opportunity_id:
             matching_chunk = r
             break
+
+    if not matching_chunk:
+        from app.models.entities import Opportunity
+        from app.db.session import SessionLocal
+        close_session = False
+        s = db
+        if s is None:
+            s = SessionLocal()
+            close_session = True
+        try:
+            rel_opp = s.query(Opportunity).filter(Opportunity.id == input_data.opportunity_id).first()
+            if rel_opp:
+                matching_chunk = {
+                    "metadata": {
+                        "opportunity_id": rel_opp.id,
+                        "title": rel_opp.title,
+                        "provider": rel_opp.provider,
+                        "category": rel_opp.category,
+                        "degree_levels": rel_opp.degree_levels or "",
+                        "fields_of_study": rel_opp.fields_of_study or "",
+                        "official_url": rel_opp.official_url,
+                        "application_deadline": rel_opp.application_deadline
+                    },
+                    "content": rel_opp.source_notes or f"Opportunity {rel_opp.title} by {rel_opp.provider}."
+                }
+        finally:
+            if close_session and s is not None:
+                s.close()
 
     if not matching_chunk:
         return {
@@ -249,17 +414,56 @@ def tool_assess_eligibility(input_data: AssessEligibilityInput) -> Dict[str, Any
 class GenerateChecklistInput(BaseModel):
     opportunity_id: str = Field(description="Target opportunity ID.")
 
-def tool_generate_application_checklist(input_data: GenerateChecklistInput) -> Dict[str, Any]:
+def tool_generate_application_checklist(input_data: GenerateChecklistInput, db: Optional[Session] = None) -> Dict[str, Any]:
     """Generates a structured checklist of documents and application tasks from verified records."""
-    results = get_vector_store().search(
-        query=f"{input_data.opportunity_id} required documents application steps process",
-        top_k=4
-    )
+    results = []
+    try:
+        results = get_vector_store().search(
+            query=f"{input_data.opportunity_id} required documents application steps process",
+            top_k=4
+        )
+    except Exception as exc:
+        logger.warning(
+            "Vector retrieval for checklist generation failed (%s: %s). Checking relational database fallback.",
+            type(exc).__name__,
+            str(exc)
+        )
 
     matching_chunks = [
         r for r in results 
         if r["metadata"].get("opportunity_id") == input_data.opportunity_id
     ]
+
+    if not matching_chunks:
+        from app.models.entities import Opportunity
+        from app.db.session import SessionLocal
+        close_session = False
+        s = db
+        if s is None:
+            s = SessionLocal()
+            close_session = True
+        try:
+            rel_opp = s.query(Opportunity).filter(Opportunity.id == input_data.opportunity_id).first()
+            if rel_opp:
+                matching_chunks = [{
+                    "metadata": {
+                        "opportunity_id": rel_opp.id,
+                        "title": rel_opp.title,
+                        "provider": rel_opp.provider,
+                        "category": rel_opp.category,
+                        "official_url": rel_opp.official_url
+                    },
+                    "content": (
+                        f"- Complete official online application form at {rel_opp.official_url}\n"
+                        f"- Submit certified copies of academic transcripts and degree/diploma certificates\n"
+                        f"- Provide government-issued National ID card or Birth Certificate\n"
+                        f"- Submit official recommendation or introduction letter from your university\n"
+                        f"- Review and adhere to all published deadline requirements"
+                    )
+                }]
+        finally:
+            if close_session and s is not None:
+                s.close()
 
     if not matching_chunks:
         return {
@@ -412,6 +616,12 @@ def execute_registered_tool(
     try:
         if norm_name in ["get_tracked_applications", "tool_get_tracked_applications"]:
             return func(validated_input, authenticated_student_id=authenticated_student_id, db=db)
+        if norm_name in ["search_opportunities", "tool_search_opportunities"]:
+            return func(validated_input, db=db)
+        if norm_name in ["assess_eligibility", "tool_assess_eligibility"]:
+            return func(validated_input, db=db)
+        if norm_name in ["generate_application_checklist", "tool_generate_application_checklist"]:
+            return func(validated_input, db=db)
         return func(validated_input)
     except Exception as e:
         return {"status": "error", "message": f"Tool execution error: {str(e)}"}
