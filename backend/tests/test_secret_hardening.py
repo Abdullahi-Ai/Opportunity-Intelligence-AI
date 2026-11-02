@@ -63,13 +63,62 @@ def test_production_rejects_short_admin_secret():
     assert "at least 16 characters" in str(exc.value)
 
 def test_production_accepts_strong_secrets():
-    """Production mode succeeds when compliant, high-entropy secrets are provided."""
+    """Production mode succeeds when compliant, high-entropy secrets and explicit origins are provided."""
     s = Settings(
         APP_ENV="production",
         SECRET_KEY="c84f9a12b67d890e1234567890abcdef1234567890abcdef1234567890abcdef",
-        ADMIN_REGISTRATION_SECRET="kenya_admin_secure_token_9999_prod"
+        ADMIN_REGISTRATION_SECRET="kenya_admin_secure_token_9999_prod",
+        ALLOWED_ORIGINS="https://opportunity-intelligence-ai.vercel.app"
     )
     assert s.APP_ENV == "production"
+
+def test_production_rejects_empty_or_missing_allowed_origins():
+    """Production mode must reject missing or empty ALLOWED_ORIGINS (fail-closed)."""
+    with pytest.raises(ValidationError) as exc:
+        Settings(
+            APP_ENV="production",
+            SECRET_KEY="c84f9a12b67d890e1234567890abcdef1234567890abcdef1234567890abcdef",
+            ADMIN_REGISTRATION_SECRET="kenya_admin_secure_token_9999_prod",
+            ALLOWED_ORIGINS=""
+        )
+    assert "ALLOWED_ORIGINS must be explicitly configured" in str(exc.value)
+
+def test_production_rejects_wildcard_allowed_origins():
+    """Production mode must reject wildcard origin '*' when credentials are enabled."""
+    with pytest.raises(ValidationError) as exc:
+        Settings(
+            APP_ENV="production",
+            SECRET_KEY="c84f9a12b67d890e1234567890abcdef1234567890abcdef1234567890abcdef",
+            ADMIN_REGISTRATION_SECRET="kenya_admin_secure_token_9999_prod",
+            ALLOWED_ORIGINS="*"
+        )
+    assert "Wildcard origin '*' is strictly prohibited in production" in str(exc.value)
+
+def test_cors_preview_regex_validation():
+    import re
+    from app.main import PREVIEW_ORIGIN_REGEX
+
+    pattern = re.compile(PREVIEW_ORIGIN_REGEX)
+
+    domains = {
+        "production": "https://opportunity-intelligence-ai.vercel.app",
+        "preview": "https://opportunity-intelligence-ai-git-feature.vercel.app",
+        "unrelated": "https://unrelated-project.vercel.app",
+        "attacker": "https://opportunity-intelligence-ai.vercel.app.attacker.com",
+    }
+
+    expected = {
+        "production": True,
+        "preview": True,
+        "unrelated": False,
+        "attacker": False,
+    }
+
+    for name, domain in domains.items():
+        result = pattern.fullmatch(domain) is not None
+        assert result == expected[name], (
+            f"Failed domain match: {name}, domain={domain}, result={result}"
+        )
 
 def test_secrets_never_exposed_in_api_responses():
     """System and health endpoints must not leak secret values."""

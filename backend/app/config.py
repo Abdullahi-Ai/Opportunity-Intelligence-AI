@@ -1,6 +1,7 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, model_validator
 import os
+from typing import Optional
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -28,6 +29,8 @@ class Settings(BaseSettings):
     
     ALLOWED_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
     RATE_LIMITING_ENABLED: bool = True
+    UPSTASH_REDIS_REST_URL: Optional[str] = Field(default=None, description="Optional Upstash Redis REST URL for distributed serverless rate limiting")
+    UPSTASH_REDIS_REST_TOKEN: Optional[str] = Field(default=None, description="Optional Upstash Redis REST Token for distributed serverless rate limiting")
     
     @model_validator(mode="after")
     def validate_production_secrets_and_paths(self):
@@ -66,6 +69,17 @@ class Settings(BaseSettings):
             if len(self.ADMIN_REGISTRATION_SECRET) < 16:
                 raise ValueError(
                     "CRITICAL SECURITY CONFIGURATION ERROR: ADMIN_REGISTRATION_SECRET must be at least 16 characters in length for production environments."
+                )
+
+            # Fail-closed production CORS origin enforcement
+            cors_origins = [o.strip() for o in (self.ALLOWED_ORIGINS or "").split(",") if o.strip()]
+            if not cors_origins:
+                raise ValueError(
+                    "CRITICAL SECURITY CONFIGURATION ERROR: ALLOWED_ORIGINS must be explicitly configured with trusted domains in production. Empty origins and localhost fallbacks are strictly prohibited."
+                )
+            if "*" in cors_origins:
+                raise ValueError(
+                    "CRITICAL SECURITY CONFIGURATION ERROR: Wildcard origin '*' is strictly prohibited in production when credentials are enabled."
                 )
 
         chroma_path = Path(self.CHROMA_PERSIST_DIRECTORY)

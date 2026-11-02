@@ -17,10 +17,11 @@ tokenizers>=0.13.2
 pyyaml>=6.0.1
 markdown>=3.6
 
-# Relational Database
+# Relational Database & Vector Extension
 sqlalchemy>=2.0.29
 alembic>=1.13.1
 psycopg2-binary>=2.9.9
+pgvector>=0.2.5
 
 # Utilities & Security
 python-jose[cryptography]>=3.3.0

@@ -1,0 +1,17 @@
+# Vercel Python Serverless Dependencies for Opportunity Intelligence AI
+fastapi>=0.110.0
+pydantic>=2.6.0
+pydantic-settings>=2.2.0
+python-dotenv>=1.0.0
+groq>=0.5.0
+sqlalchemy>=2.0.29
+alembic>=1.13.1
+psycopg2-binary>=2.9.9
+pgvector>=0.2.5
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+python-multipart>=0.0.9
+onnxruntime>=1.14.1
+tokenizers>=0.13.2
+numpy>=1.24.0
+httpx>=0.27.0

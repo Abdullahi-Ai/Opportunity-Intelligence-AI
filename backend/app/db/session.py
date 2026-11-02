@@ -1,5 +1,7 @@
+import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy.pool import NullPool
 from app.config import settings
 
 db_url = settings.DATABASE_URL
@@ -12,6 +14,14 @@ if db_url.startswith("sqlite"):
         connect_args={"check_same_thread": False},
         echo=False
     )
+elif "-pooler." in db_url or os.environ.get("VERCEL"):
+    engine = create_engine(
+        db_url,
+        poolclass=NullPool,
+        pool_pre_ping=True,
+        connect_args={"connect_timeout": 10},
+        echo=False
+    )
 else:
     engine = create_engine(
         db_url,
@@ -19,6 +29,7 @@ else:
         max_overflow=20,
         pool_pre_ping=True,
         pool_recycle=300,
+        connect_args={"connect_timeout": 10},
         echo=False
     )
 
@@ -30,5 +41,8 @@ def get_db():
     db = SessionLocal()
     try:
         yield db
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()

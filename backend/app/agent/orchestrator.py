@@ -69,8 +69,8 @@ class AgentOrchestrator:
         self,
         api_key: str = settings.GROQ_API_KEY,
         model: str = settings.GROQ_MODEL,
-        max_tool_iterations: int = 5,
-        timeout_seconds: float = 30.0
+        max_tool_iterations: int = 4,
+        timeout_seconds: float = 15.0
     ):
         self.api_key = api_key
         self.model = model
@@ -83,7 +83,11 @@ class AgentOrchestrator:
         if self._groq_client is None and self.api_key and self.api_key != "your_groq_api_key_here":
             try:
                 from groq import Groq
-                self._groq_client = Groq(api_key=self.api_key, timeout=self.timeout_seconds)
+                self._groq_client = Groq(
+                    api_key=self.api_key,
+                    timeout=self.timeout_seconds,
+                    max_retries=2
+                )
             except Exception as e:
                 logger.warning(f"Failed to initialize Groq client: {e}")
         return self._groq_client

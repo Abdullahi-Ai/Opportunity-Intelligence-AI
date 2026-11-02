@@ -4,10 +4,21 @@ Provides vector upserts, semantic similarity search, metadata filtering, and col
 """
 
 import os
+import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional
-import chromadb
-from chromadb.config import Settings as ChromaSettings
+
+logger = logging.getLogger(__name__)
+
+try:
+    import chromadb
+    from chromadb.config import Settings as ChromaSettings
+    HAS_CHROMADB = True
+except ImportError:
+    HAS_CHROMADB = False
+    chromadb = None
+    ChromaSettings = None
+
 from app.config import settings
 from app.rag.embeddings import embedding_function
 from app.rag.document_loader import OpportunityChunk
@@ -18,6 +29,8 @@ class VectorStore:
         persist_dir: str = settings.CHROMA_PERSIST_DIRECTORY,
         collection_name: str = settings.CHROMA_COLLECTION_NAME
     ):
+        if not HAS_CHROMADB:
+            raise RuntimeError("ChromaDB is not installed in this environment.")
         self.persist_dir = persist_dir
         self.collection_name = collection_name
         Path(self.persist_dir).mkdir(parents=True, exist_ok=True)
@@ -121,4 +134,11 @@ class VectorStore:
             metadata={"description": "Verified Kenya educational and career opportunities"}
         )
 
-vector_store = VectorStore()
+if HAS_CHROMADB:
+    try:
+        vector_store = VectorStore()
+    except Exception as e:
+        logger.warning(f"Could not initialize default ChromaDB vector_store: {e}")
+        vector_store = None
+else:
+    vector_store = None

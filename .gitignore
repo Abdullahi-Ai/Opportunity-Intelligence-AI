@@ -38,6 +38,8 @@ env/
 
 # Vector databases & persistent test caches
 backend/data/chromadb/
+backend/data/backup_chromadb_export.json
+backend/data/chromadb_raw_backup.tar.gz
 /data/
 *.chroma
 *.db

@@ -12,7 +12,7 @@ from datetime import date, datetime
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.rag.vector_store import vector_store
+from app.rag import get_vector_store
 
 class SearchOpportunitiesInput(BaseModel):
     query: str = Field(description="Natural language search query for scholarships, internships, or requirements.")
@@ -20,8 +20,8 @@ class SearchOpportunitiesInput(BaseModel):
     top_k: int = Field(default=4, ge=1, le=10, description="Number of results to retrieve.")
 
 def tool_search_opportunities(input_data: SearchOpportunitiesInput) -> Dict[str, Any]:
-    """Retrieves grounded opportunity chunks and official source links from ChromaDB."""
-    results = vector_store.search(
+    """Retrieves grounded opportunity chunks and official source links from verified vector store."""
+    results = get_vector_store().search(
         query=input_data.query,
         top_k=input_data.top_k,
         category=input_data.category
@@ -156,7 +156,7 @@ def tool_assess_eligibility(input_data: AssessEligibilityInput) -> Dict[str, Any
     Evaluates published opportunity criteria against student parameters.
     Returns criteria breakdown classified as Meets, Does Not Meet, or Needs Verification.
     """
-    results = vector_store.search(
+    results = get_vector_store().search(
         query=f"{input_data.opportunity_id} eligibility criteria minimum requirements",
         top_k=2
     )
@@ -251,7 +251,7 @@ class GenerateChecklistInput(BaseModel):
 
 def tool_generate_application_checklist(input_data: GenerateChecklistInput) -> Dict[str, Any]:
     """Generates a structured checklist of documents and application tasks from verified records."""
-    results = vector_store.search(
+    results = get_vector_store().search(
         query=f"{input_data.opportunity_id} required documents application steps process",
         top_k=4
     )

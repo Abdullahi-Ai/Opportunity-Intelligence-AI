@@ -1,10 +1,14 @@
 import time
 import math
+import logging
 from typing import Dict, List, Optional
 from fastapi import Request, HTTPException, status
 from app.config import settings
 
+logger = logging.getLogger(__name__)
+
 class InMemoryRateLimiter:
+    """Local in-memory sliding-window rate limiter."""
     def __init__(self):
         self._records: Dict[str, List[float]] = {}
 
@@ -33,7 +37,60 @@ class InMemoryRateLimiter:
         valid_timestamps.append(now)
         self._records[key] = valid_timestamps
 
-rate_limiter = InMemoryRateLimiter()
+
+class DistributedRateLimiter:
+    """
+    Hybrid Serverless Rate Limiter.
+    If UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are set, uses HTTP-based
+    distributed atomic pipeline across all serverless function instances.
+    If not set (or if Upstash is temporarily unreachable), falls back transparently
+    to local InMemoryRateLimiter.
+    """
+    def __init__(self, memory_fallback: Optional[InMemoryRateLimiter] = None):
+        self.memory = memory_fallback or InMemoryRateLimiter()
+
+    def is_distributed(self) -> bool:
+        return bool(settings.UPSTASH_REDIS_REST_URL and settings.UPSTASH_REDIS_REST_TOKEN)
+
+    def reset(self):
+        self.memory.reset()
+
+    def check_rate_limit(self, key: str, max_requests: int, window_seconds: int = 60):
+        if not settings.RATE_LIMITING_ENABLED:
+            return
+
+        if self.is_distributed():
+            try:
+                import httpx
+                pipeline_url = f"{settings.UPSTASH_REDIS_REST_URL.rstrip('/')}/pipeline"
+                headers = {"Authorization": f"Bearer {settings.UPSTASH_REDIS_REST_TOKEN}"}
+                commands = [
+                    ["INCR", f"rl:{key}"],
+                    ["EXPIRE", f"rl:{key}", window_seconds]
+                ]
+                with httpx.Client(timeout=1.5) as client:
+                    resp = client.post(pipeline_url, json=commands, headers=headers)
+                    if resp.status_code == 200:
+                        results = resp.json()
+                        count = results[0].get("result", 1)
+                        if count > max_requests:
+                            raise HTTPException(
+                                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                                detail=f"Rate limit exceeded. Maximum {max_requests} requests per {window_seconds} seconds.",
+                                headers={"Retry-After": str(window_seconds)}
+                            )
+                        return
+                    else:
+                        logger.warning(f"Upstash rate limit returned {resp.status_code}; falling back to memory.")
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.warning(f"Upstash distributed rate limit check failed ({e}); falling back to in-memory.")
+
+        self.memory.check_rate_limit(key=key, max_requests=max_requests, window_seconds=window_seconds)
+
+
+rate_limiter = DistributedRateLimiter()
 
 def get_client_identifier(request: Request) -> str:
     auth_header = request.headers.get("Authorization")

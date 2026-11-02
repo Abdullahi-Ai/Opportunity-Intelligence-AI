@@ -26,7 +26,8 @@ from app.agent.tools import (
     GenerateChecklistInput
 )
 
-Base.metadata.create_all(bind=engine)
+if engine.dialect.name == "sqlite":
+    Base.metadata.create_all(bind=engine)
 
 router = APIRouter(prefix="/api/v1", tags=["Application Data & Tracking"])
 
