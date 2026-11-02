@@ -278,6 +278,20 @@ class RobustEmbeddingFunction:
                 tok_path = os.path.join(target_cache_dir, "tokenizer.json")
 
                 if not (os.path.exists(model_path) and os.path.exists(tok_path)):
+                    # In serverless environments (Vercel / AWS Lambda), an 80MB on-demand download
+                    # causes request timeout (504 FUNCTION_INVOCATION_TIMEOUT).
+                    # Fail fast immediately to allow the existing relational fallback to respond in < 15ms.
+                    if is_serverless_environment():
+                        logger.info(
+                            "ONNX model weights not pre-cached in serverless container (%s); "
+                            "failing fast to allow immediate relational fallback.",
+                            target_cache_dir
+                        )
+                        raise RuntimeError(
+                            f"ONNX model weights not pre-cached in serverless container ({target_cache_dir}). "
+                            "Failing fast to trigger graceful relational fallback."
+                        )
+
                     with _DOWNLOAD_LOCK:
                         # Double-check inside lock
                         if not (os.path.exists(model_path) and os.path.exists(tok_path)):

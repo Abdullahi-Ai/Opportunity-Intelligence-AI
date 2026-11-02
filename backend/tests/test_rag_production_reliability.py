@@ -301,3 +301,123 @@ def test_preservation_of_official_opportunity_metadata():
         assert opp["deadline"] is not None
         assert opp["similarity_score"] >= 0.50
         assert opp["retrieval_mode"] == "relational_fallback"
+
+
+# 13. Serverless fail-fast when model is missing: fails immediately without attempting download
+def test_serverless_missing_model_fails_fast_without_download(tmp_path):
+    empty_cache = tmp_path / "empty_serverless_cache"
+    empty_cache.mkdir()
+
+    RobustEmbeddingFunction.reset_cached_engine()
+    ef = RobustEmbeddingFunction()
+
+    env_overrides = {
+        "VERCEL": "1",
+        "OI_ONNX_CACHE_DIR": str(empty_cache)
+    }
+
+    with patch.dict(os.environ, env_overrides):
+        with patch.dict(sys.modules, {"chromadb": None, "chromadb.utils": None, "sentence_transformers": None}):
+            with patch("urllib.request.urlopen") as mock_urlopen:
+                with pytest.raises(RuntimeError) as excinfo:
+                    ef._get_engine()
+
+                assert "not pre-cached in serverless container" in str(excinfo.value)
+                # Confirm zero network activity was attempted
+                mock_urlopen.assert_not_called()
+
+
+# 14. Serverless cached model initializes normally without error
+def test_serverless_cached_model_initializes_normally(tmp_path):
+    cached_dir = tmp_path / "serverless_cached_dir"
+    cached_dir.mkdir()
+    (cached_dir / "model.onnx").write_text("model weights")
+    (cached_dir / "tokenizer.json").write_text("tokenizer config")
+
+    RobustEmbeddingFunction.reset_cached_engine()
+    ef = RobustEmbeddingFunction()
+
+    env_overrides = {
+        "VERCEL": "1",
+        "OI_ONNX_CACHE_DIR": str(cached_dir)
+    }
+
+    with patch.dict(os.environ, env_overrides):
+        with patch.dict(sys.modules, {"chromadb": None, "chromadb.utils": None, "sentence_transformers": None}):
+            with patch("app.rag.embeddings.StandaloneONNXEngine") as mock_engine_cls:
+                mock_instance = MagicMock()
+                mock_engine_cls.return_value = mock_instance
+
+                engine = ef._get_engine()
+                assert engine is mock_instance
+                mock_engine_cls.assert_called_once_with(
+                    str(cached_dir / "model.onnx"),
+                    str(cached_dir / "tokenizer.json")
+                )
+
+
+# 15. Local development retains model downloading when missing
+def test_local_development_retains_model_download(tmp_path):
+    empty_dir = tmp_path / "empty_local_cache"
+    empty_dir.mkdir()
+
+    RobustEmbeddingFunction.reset_cached_engine()
+    ef = RobustEmbeddingFunction()
+
+    env_clean = {k: v for k, v in os.environ.items() if k not in ["VERCEL", "AWS_LAMBDA_FUNCTION_NAME", "LAMBDA_TASK_ROOT"]}
+    env_clean["OI_ONNX_CACHE_DIR"] = str(empty_dir)
+
+    with patch.dict(os.environ, env_clean, clear=True):
+        with patch.dict(sys.modules, {"chromadb": None, "chromadb.utils": None, "sentence_transformers": None}):
+            with patch("app.rag.embeddings.download_and_extract_model") as mock_download:
+                # After download, mock existence of the files
+                def fake_download(target):
+                    (empty_dir / "model.onnx").write_text("downloaded model")
+                    (empty_dir / "tokenizer.json").write_text("downloaded tok")
+                mock_download.side_effect = fake_download
+
+                with patch("app.rag.embeddings.StandaloneONNXEngine") as mock_engine_cls:
+                    mock_engine_cls.return_value = MagicMock()
+                    engine = ef._get_engine()
+                    mock_download.assert_called_once_with(str(empty_dir))
+
+
+# 16. End-to-end opportunity search serverless fail-fast triggers relational fallback
+def test_opportunity_search_serverless_fail_fast_end_to_end(tmp_path):
+    empty_dir = tmp_path / "empty_serverless_e2e"
+    empty_dir.mkdir()
+
+    RobustEmbeddingFunction.reset_cached_engine()
+
+    env_overrides = {
+        "VERCEL": "1",
+        "OI_ONNX_CACHE_DIR": str(empty_dir)
+    }
+
+    with patch.dict(os.environ, env_overrides):
+        with patch.dict(sys.modules, {"chromadb": None, "chromadb.utils": None, "sentence_transformers": None}):
+            with patch("urllib.request.urlopen") as mock_urlopen:
+                # Search for scholarships
+                res = tool_search_opportunities(SearchOpportunitiesInput(
+                    query="Show me scholarships in Kenya",
+                    top_k=3
+                ))
+
+                assert res["status"] == "success"
+                assert res["retrieval_mode"] == "relational_fallback"
+                assert len(res["results"]) > 0
+                mock_urlopen.assert_not_called()
+
+
+# 17. Unexpected database errors in relational fallback are not silently masked as success
+def test_relational_fallback_database_error_not_masked():
+    mock_bad_session = MagicMock()
+    mock_bad_session.query.side_effect = Exception("FATAL: Neon connection terminated unexpectedly")
+
+    with pytest.raises(Exception) as excinfo:
+        _search_opportunities_relational_fallback(
+            query="scholarships",
+            db=mock_bad_session
+        )
+
+    assert "Neon connection terminated unexpectedly" in str(excinfo.value)
