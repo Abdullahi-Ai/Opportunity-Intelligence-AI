@@ -4,9 +4,31 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.pool import NullPool
 from app.config import settings
 
-db_url = settings.DATABASE_URL
-if db_url.startswith("postgres://"):
-    db_url = db_url.replace("postgres://", "postgresql://", 1)
+def normalize_database_url(url: str) -> str:
+    """
+    Normalizes database connection URLs for SQLAlchemy and Psycopg 2 compatibility.
+
+    Guarantees:
+    - 'postgres://' -> 'postgresql+psycopg2://'
+    - 'postgresql://' -> 'postgresql+psycopg2://'
+    - 'postgresql+psycopg://' -> 'postgresql+psycopg2://'
+    - 'postgresql+psycopg2://' -> unchanged
+    - 'sqlite://...' -> unchanged
+    - Only modifies the scheme prefix, leaving credentials and query params untouched.
+    """
+    if not url:
+        return url
+    if url.startswith("postgresql+psycopg2://"):
+        return url
+    elif url.startswith("postgresql+psycopg://"):
+        return "postgresql+psycopg2://" + url[len("postgresql+psycopg://"):]
+    elif url.startswith("postgres://"):
+        return "postgresql+psycopg2://" + url[len("postgres://"):]
+    elif url.startswith("postgresql://"):
+        return "postgresql+psycopg2://" + url[len("postgresql://"):]
+    return url
+
+db_url = normalize_database_url(settings.DATABASE_URL)
 
 if db_url.startswith("sqlite"):
     engine = create_engine(

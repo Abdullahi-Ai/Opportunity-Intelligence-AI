@@ -8,7 +8,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
 from app.config import settings
-from app.db.session import Base
+from app.db.session import Base, normalize_database_url
 import app.models.entities
 
 config = context.config
@@ -16,9 +16,7 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-db_url = settings.DATABASE_URL
-if db_url.startswith("postgres://"):
-    db_url = db_url.replace("postgres://", "postgresql://", 1)
+db_url = normalize_database_url(settings.DATABASE_URL)
 if "-pooler." in db_url:
     db_url = db_url.replace("-pooler.", ".")
 
