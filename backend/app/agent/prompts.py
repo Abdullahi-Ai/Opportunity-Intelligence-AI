@@ -45,9 +45,18 @@ def build_student_context_prompt(student_profile: dict = None) -> str:
     
     context = "\n### VERIFIED STUDENT PROFILE (PERSISTENT MEMORY):\n"
     context += f"- Full Name: {student_profile.get('full_name', 'Student')}\n"
+    context += f"- Country: {student_profile.get('country', 'Kenya')}\n"
     context += f"- University: {student_profile.get('university', 'Kenyan University')}\n"
-    context += f"- Field of Study: {student_profile.get('field_of_study', 'General')}\n"
+    if student_profile.get("degree_title"):
+        context += f"- Degree Title: {student_profile.get('degree_title')}\n"
+    specs = student_profile.get("specialisations")
+    if specs:
+        specs_str = ", ".join(specs) if isinstance(specs, list) else str(specs)
+        context += f"- Specialisations: {specs_str}\n"
+    context += f"- Field of Study / Domain: {student_profile.get('field_of_study', 'General')}\n"
     context += f"- Degree Level: {student_profile.get('degree_level', 'Undergraduate')}\n"
+    if student_profile.get("expected_graduation"):
+        context += f"- Expected Graduation: {student_profile.get('expected_graduation')}\n"
     context += f"- Year of Study: Year {student_profile.get('year_of_study', 1)}\n"
     if student_profile.get("county_of_origin"):
         context += f"- County of Origin: {student_profile.get('county_of_origin')}\n"

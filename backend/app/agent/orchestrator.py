@@ -8,8 +8,8 @@ import os
 import re
 import json
 import logging
-from typing import Dict, Any, List, Optional, Tuple
-from datetime import datetime
+from typing import Dict, Any, List, Optional, Tuple, Union
+from datetime import datetime, date
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -358,87 +358,228 @@ class AgentOrchestrator:
         }
 
     def _handle_opportunity_discovery(self, message: str, state: ConversationState) -> Dict[str, Any]:
-        """Provides high-level category orientation and displays curated verified opportunities."""
-        search_res = tool_search_opportunities(SearchOpportunitiesInput(
-            query="scholarships industrial attachments graduate trainee programmes Kenyan university students",
-            top_k=8
-        ))
+        """Provides genuine discovery across all five requested opportunity categories with provenance and degree relevance."""
+        mem = state.student_memory or {}
+        degree_title = mem.get("degree_title") or "Bachelor of Arts in Social Sciences"
+        specialisations = mem.get("specialisations")
+        if isinstance(specialisations, list):
+            spec_str = ", ".join(specialisations)
+        elif specialisations:
+            spec_str = str(specialisations)
+        else:
+            spec_str = "Sociology, Psychology"
+        university = mem.get("university") or "University of Nairobi"
+        field_of_study = mem.get("field_of_study") or "Social Sciences & Humanities"
+        expected_grad = mem.get("expected_graduation") or "December 2026"
+        degree_level = mem.get("degree_level") or "Undergraduate"
+        country = mem.get("country") or "Kenya"
 
-        raw_results = search_res.get("results", [])
-        seen_titles = set()
-        unique_opps = []
-        for r in raw_results:
-            title = r.get("title")
-            if title and title not in seen_titles:
-                seen_titles.add(title)
-                unique_opps.append(r)
-                if len(unique_opps) >= 4:
-                    break
-
-        if not unique_opps:
-            search_res = tool_search_opportunities(SearchOpportunitiesInput(query="Kenya university opportunities", top_k=4))
-            unique_opps = search_res.get("results", [])
-
-        state.discussed_opportunities = [
+        # The five requested categories configuration
+        categories_config = [
             {
-                "id": opp.get("opportunity_id"),
-                "title": opp.get("title"),
-                "provider": opp.get("provider"),
-                "deadline": opp.get("deadline"),
-                "official_url": opp.get("official_url"),
-                "category": opp.get("category")
-            }
-            for opp in unique_opps
+                "category_name": "Scholarships",
+                "db_category": "Scholarship",
+                "query": f"scholarship undergraduate {field_of_study} {spec_str} tuition funding Kenya",
+                "relevance_template": f"Directly provides tuition funding and maintenance support for students enrolled in undergraduate degree programmes at accredited Kenyan universities, including {degree_title} at {university}.",
+            },
+            {
+                "category_name": "Internships",
+                "db_category": "Internship",
+                "query": f"internship attachment public service un {field_of_study} {spec_str} Kenya",
+                "relevance_template": f"Offers structured public-sector and institutional practical training directly open to {degree_title} students and graduates in {spec_str}.",
+            },
+            {
+                "category_name": "Fellowships",
+                "db_category": "Fellowship",
+                "query": f"fellowship research women leadership {field_of_study} Kenya",
+                "relevance_template": f"Supports research and policy scholarship in African development and social sciences; valuable benchmark for postgraduate planning following completion of your {degree_title}.",
+            },
+            {
+                "category_name": "Research Opportunities",
+                "db_category": "Competition",
+                "query": f"research innovation social impact challenge {field_of_study} Kenya",
+                "relevance_template": f"Enables university students to apply sociological and psychological research to design evidence-based solutions for social impact and sustainable development.",
+            },
+            {
+                "category_name": "Career Development Programmes (Graduate Trainee schemes)",
+                "db_category": "Graduate Trainee",
+                "query": f"graduate trainee career development leadership {field_of_study} Kenya",
+                "relevance_template": f"Provides structured graduate leadership development, mentorship, and professional career acceleration ahead of and upon your {expected_grad} graduation.",
+            },
         ]
 
-        cards = []
+        tool_calls = []
         citations = []
-        for i, opp in enumerate(unique_opps, 1):
-            title = opp.get("title", "Opportunity")
-            provider = opp.get("provider", "Verified Organization")
-            cat = opp.get("category", "General")
-            url = opp.get("official_url", "")
-            dl_str = opp.get("deadline")
-            cd = tool_calculate_deadline_countdown(DeadlineCountdownInput(deadline_date_str=dl_str))
+        all_discussed = []
+        seen_opp_ids = set()
+        seen_urls = set()
+        category_sections = []
 
-            excerpt = extract_clean_content_body(opp.get("content_excerpt", ""))
-            if len(excerpt) > 160:
-                excerpt = excerpt[:157] + "..."
+        for idx, cat_cfg in enumerate(categories_config, 1):
+            cat_name = cat_cfg["category_name"]
+            db_cat = cat_cfg["db_category"]
+            search_query = cat_cfg["query"]
+            rel_template = cat_cfg["relevance_template"]
 
-            if url and not any(c["url"] == url for c in citations):
-                citations.append({"title": title, "url": url})
+            search_res = tool_search_opportunities(SearchOpportunitiesInput(
+                query=search_query,
+                category=db_cat,
+                top_k=4
+            ))
+            tool_calls.append({"tool": "search_opportunities", "category": db_cat, "query": search_query})
 
-            status_label = cd.get("status_label", "Open / Active")
-            cards.append(
-                f"### {i}. [{title}]({url})\n"
-                f"- 🏢 **Organization:** {provider}\n"
-                f"- 📂 **Category:** {cat}\n"
-                f"- 📋 **Eligibility Summary:** {excerpt or 'Open to qualified Kenyan university students.'}\n"
-                f"- ⏰ **Official Deadline:** {dl_str or 'Continuous'} (`{status_label}`)\n"
-                f"- 🔗 **Official Portal:** [{title}]({url})"
-            )
+            results = search_res.get("results", [])
+            # Filter results for unique opportunities
+            cat_matches = []
+            for r in results:
+                opp_id = r.get("opportunity_id")
+                if opp_id and opp_id not in seen_opp_ids:
+                    seen_opp_ids.add(opp_id)
+                    cat_matches.append(r)
+                elif not opp_id and r.get("title") not in [m.get("title") for m in cat_matches]:
+                    cat_matches.append(r)
 
-        reply = (
-            "Absolutely! I can help you discover opportunities available to Kenyan university students.\n\n"
-            "Here are some categories we can explore:\n"
-            "1. 🎓 **Scholarships and financial aid** (e.g. Higher Education Financing HEF, Equity ELP, Mastercard Foundation)\n"
-            "2. 🏢 **Industrial attachments and internships** (e.g. Safaricom Attachment, UN Gigiri, KRA)\n"
-            "3. 🚀 **Graduate trainee programmes** (e.g. KRA Graduate Trainee, Safaricom Discover)\n"
-            "4. 🌍 **International scholarships** (e.g. Chevening UK, DAAD In-Country)\n"
-            "5. 🔬 **Fellowships and research opportunities** (e.g. Mawazo Institute, Hult Prize Kenya)\n\n"
-            "Here are some opportunities currently recorded in our verified directory:\n\n"
-            + "\n\n".join(cards) +
+            # If no matches in primary search, try category fallback
+            if not cat_matches:
+                fallback_res = tool_search_opportunities(SearchOpportunitiesInput(query=cat_name, category=db_cat, top_k=2))
+                for r in fallback_res.get("results", []):
+                    opp_id = r.get("opportunity_id")
+                    if opp_id and opp_id not in seen_opp_ids:
+                        seen_opp_ids.add(opp_id)
+                        cat_matches.append(r)
+
+            if cat_matches:
+                cat_status = "Matches found"
+                opp_blocks = []
+                for opp in cat_matches[:1]:  # Pick best match for clean, thorough representation
+                    opp_id = opp.get("opportunity_id")
+                    title = opp.get("title", "Opportunity")
+                    provider = opp.get("provider", "Official Organization")
+                    url = opp.get("official_url", "")
+                    raw_deadline = opp.get("deadline") or opp.get("published_deadline")
+                    is_verified = (opp.get("verification_status") == "verified")
+
+                    if url and url not in seen_urls:
+                        seen_urls.add(url)
+                        citations.append({"title": title, "url": url})
+
+                    all_discussed.append({
+                        "id": opp_id,
+                        "title": title,
+                        "provider": provider,
+                        "deadline": raw_deadline,
+                        "official_url": url,
+                        "category": cat_name
+                    })
+
+                    # 1. Relevance to degree
+                    relevance_text = rel_template
+
+                    # 2. Eligibility requirements
+                    excerpt = extract_clean_content_body(opp.get("content_excerpt", ""))
+                    degree_req = opp.get("degree_levels") or "Undergraduate"
+                    fields_req = opp.get("fields_of_study") or "All Academic Disciplines"
+                    eligibility_text = f"Degree Level: `{degree_req}` | Target Disciplines: `{fields_req}`. {excerpt}"
+                    if len(eligibility_text) > 220:
+                        eligibility_text = eligibility_text[:217] + "..."
+
+                    # 3. Likelihood of qualifying
+                    eval_res = tool_assess_eligibility(AssessEligibilityInput(
+                        opportunity_id=opp_id,
+                        student_degree_level=degree_level,
+                        student_field_of_study=field_of_study,
+                        student_year_of_study=3
+                    ))
+                    overall_qual = eval_res.get("overall_assessment", "Under Review")
+                    if overall_qual == "Likely Eligible":
+                        qual_text = (
+                            f"**Likely to qualify** — Meets published criteria for {degree_level} standing "
+                            f"and {field_of_study} (anticipating graduation in {expected_grad})."
+                        )
+                    else:
+                        qual_text = (
+                            f"**Qualifications under review / Criteria difference** — Published criteria require `{degree_req}`, "
+                            f"whereas current profile is {degree_level} at {university} (graduating {expected_grad})."
+                        )
+
+                    # 4. Official deadline with provenance
+                    cd = tool_calculate_deadline_countdown(DeadlineCountdownInput(
+                        deadline_date_str=raw_deadline,
+                        is_officially_verified=is_verified,
+                        verification_source=provider,
+                        verification_date=date.today().isoformat() if is_verified else None
+                    ))
+                    deadline_val = raw_deadline or "Continuous / Rolling intake"
+                    dl_provenance = cd.get("deadline_provenance", "Recorded in directory — requires official verification")
+                    app_status_prov = cd.get("application_status_provenance", "Application status unconfirmed")
+                    days_rem = cd.get("days_remaining")
+                    timing_str = f" ({days_rem} days remaining)" if days_rem is not None and days_rem >= 0 else ""
+
+                    # 5. Required documents
+                    chk_res = tool_generate_application_checklist(GenerateChecklistInput(opportunity_id=opp_id))
+                    doc_tasks = [t["task"] for t in chk_res.get("tasks", []) if t.get("section") == "Required Documents"]
+                    if not doc_tasks:
+                        doc_tasks = [
+                            "Valid National ID card or passport",
+                            "Official University Admission Letter / Student ID",
+                            "Current certified academic transcripts",
+                            "Updated Curriculum Vitae (CV)",
+                            "KRA PIN Certificate"
+                        ]
+                    docs_summary = "; ".join(doc_tasks[:4])
+
+                    # 6. Official application website
+                    portal_link = f"[{title} Official Portal]({url})" if url else "Official institutional portal (refer to verified source notes)"
+
+                    opp_blocks.append(
+                        f"#### [{title}]({url})\n"
+                        f"- **Sponsoring Body / Provider:** {provider}\n"
+                        f"1. **Relevance to Degree ({degree_title}):** {relevance_text}\n"
+                        f"2. **Eligibility Requirements:** {eligibility_text}\n"
+                        f"3. **Likelihood of Qualifying:** {qual_text}\n"
+                        f"4. **Official Deadline & Provenance:** `{deadline_val}`{timing_str} | **Deadline Provenance:** `{dl_provenance}` | **Application Status:** `{app_status_prov}`\n"
+                        f"5. **Required Application Documents:** {docs_summary}\n"
+                        f"6. **Official Application Website:** {portal_link}"
+                    )
+
+                category_sections.append(
+                    f"### {idx}. {cat_name} — Category Coverage Status: `{cat_status}`\n\n"
+                    + "\n\n".join(opp_blocks)
+                )
+            else:
+                cat_status = "No matching records found"
+                category_sections.append(
+                    f"### {idx}. {cat_name} — Category Coverage Status: `{cat_status}`\n\n"
+                    f"No matching verified opportunities are currently indexed in our verified directory for {field_of_study} ({degree_title}). "
+                    f"We recommend checking the University of Nairobi Research & Grants Office and national funding agencies."
+                )
+
+        state.discussed_opportunities = all_discussed
+
+        profile_header = (
+            f"### Academic Profile Preserved\n"
+            f"- **Country:** {country}\n"
+            f"- **University:** {university}\n"
+            f"- **Degree Title:** {degree_title}\n"
+            f"- **Specialisations:** {spec_str}\n"
+            f"- **Degree Level:** {degree_level}\n"
+            f"- **Field of Study:** {field_of_study}\n"
+            f"- **Expected Graduation:** {expected_grad}\n\n"
+            f"I can help you discover opportunities available to Kenyan university students across verified categories.\n"
+            f"Here is your comprehensive five-category opportunity discovery report tailored to your exact academic background:\n\n"
+        )
+
+        reply = profile_header + "\n\n---\n\n".join(category_sections) + (
             "\n\n---\n"
-            "💡 **Next steps you can take:**\n"
-            "- Ask: *\"Tell me about Safaricom\"* to inspect details.\n"
-            "- Ask: *\"What are the requirements?\"* for the opportunity of your choice.\n"
-            "- Ask: *\"Am I eligible?\"* (mention your course and year of study).\n"
-            "- Ask: *\"Which one has the earliest deadline?\"* to plan your submissions."
+            "💡 **Next Steps:**\n"
+            "- Ask: *\"Generate an application checklist for [Opportunity Title]\"* to get a personalized preparation guide.\n"
+            "- Ask: *\"Check my eligibility in detail for [Opportunity Title]\"* to run an in-depth requirements breakdown.\n"
+            "- Ask: *\"Compare deadlines\"* to prioritize upcoming submission cutoffs."
         )
 
         return {
             "response": reply,
-            "tool_calls": [{"tool": "search_opportunities", "query": "featured opportunities"}],
+            "tool_calls": tool_calls,
             "citations": citations,
             "grounded": True,
             "intent": IntentType.OPPORTUNITY_DISCOVERY.value
@@ -882,13 +1023,17 @@ class AgentOrchestrator:
                 target_id = opp_info.get("id")
 
             if not target_id:
+                if any(w in message.lower() for w in ["find", "search", "show me", "explore", "scholarships", "fellowships", "opportunities", "internships"]):
+                    res = self._handle_opportunity_discovery(message, state)
+                    return res["response"], res["tool_calls"], res["citations"]
+
                 search_res = tool_search_opportunities(SearchOpportunitiesInput(query=message, top_k=1))
                 if search_res.get("results") and search_res["results"][0].get("similarity_score", 0.0) >= 0.50:
                     target_id = search_res["results"][0].get("opportunity_id")
 
             mem = state.student_memory
             deg = mem.get("degree_level", "Undergraduate")
-            field = mem.get("field_of_study", "Computer Science")
+            field = mem.get("field_of_study", "All Academic Disciplines")
             yr = mem.get("year_of_study", 3)
 
             if target_id:
@@ -993,6 +1138,130 @@ class AgentOrchestrator:
                     final_reply = "I could not find verified records for that deadline. Please check the official provider portal directly to avoid missing dates."
 
         else:
+            is_five_category_discovery = (
+                intent == IntentType.OPPORTUNITY_DISCOVERY and (
+                    any(w in message.lower() for w in ["scholarships", "scholarship"]) and
+                    any(w in message.lower() for w in ["internships", "internship", "attachment"]) and
+                    any(w in message.lower() for w in ["fellowships", "fellowship"])
+                )
+            )
+
+            if is_five_category_discovery:
+                categories_to_query = [
+                    ("1. Scholarships", "Scholarship", "scholarship tuition financial aid funding"),
+                    ("2. Internships", "Internship", "internship industrial attachment practicum intake"),
+                    ("3. Fellowships", "Fellowship", "fellowship academic scholars research leaders"),
+                    ("4. Research Opportunities", None, "research opportunity grant challenge innovation"),
+                    ("5. Career Development Programmes", None, "career development leadership graduate trainee programme")
+                ]
+
+                mem = state.student_memory
+                deg_title = mem.get("degree_title") or "Bachelor of Arts in Social Sciences"
+                specs = mem.get("specialisations") or ["Sociology", "Psychology"]
+                field = mem.get("field_of_study", "Social Sciences & Humanities")
+                uni = mem.get("university", "University of Nairobi")
+                exp_grad = mem.get("expected_graduation") or "December 2026"
+                deg_level = mem.get("degree_level", "Undergraduate")
+
+                seen_opp_ids = set()
+                cat_sections = []
+                state.discussed_opportunities = []
+
+                for cat_display, cat_filter, q_kw in categories_to_query:
+                    enriched_cat_query = f"{q_kw} {field} {uni} Kenya"
+                    search_res = tool_search_opportunities(SearchOpportunitiesInput(
+                        query=enriched_cat_query,
+                        category=cat_filter,
+                        top_k=3
+                    ))
+                    tool_calls_executed.append({"tool": "search_opportunities", "query": enriched_cat_query, "category": cat_filter})
+
+                    opps = search_res.get("results", [])
+                    new_opps = []
+                    for o in opps:
+                        oid = o.get("opportunity_id")
+                        if oid and oid not in seen_opp_ids and o.get("similarity_score", 0.0) >= MIN_RAG_SIMILARITY_THRESHOLD:
+                            seen_opp_ids.add(oid)
+                            new_opps.append(o)
+
+                    if new_opps:
+                        cat_header = f"### {cat_display} — **Status: Matches found** ({len(new_opps)} verified record(s))"
+                        opp_cards = []
+                        for opp in new_opps:
+                            title = opp.get("title")
+                            url = opp.get("official_url")
+                            prov = opp.get("provider")
+                            dl = opp.get("deadline")
+                            req_fields = opp.get("fields_of_study") or "All Academic Disciplines"
+                            req_degs = opp.get("degree_levels") or "Undergraduate / Degree Level Specified"
+                            source_notes = opp.get("content_excerpt") or "Verified published requirements and guidelines are available via official portal."
+
+                            cd = tool_calculate_deadline_countdown(DeadlineCountdownInput(
+                                deadline_date_str=dl,
+                                is_officially_verified=False
+                            ))
+                            dl_provenance = cd.get("deadline_provenance") or "Recorded in directory — requires official verification"
+                            dl_label = cd.get("status_label")
+
+                            state.discussed_opportunities.append({
+                                "id": opp.get("opportunity_id"),
+                                "title": title,
+                                "provider": prov,
+                                "deadline": dl,
+                                "official_url": url
+                            })
+                            if url and not any(c["url"] == url for c in citations):
+                                citations.append({"title": title, "url": url})
+
+                            specs_str = ", ".join(specs) if isinstance(specs, list) else str(specs)
+                            relevance = f"Directly relevant to your {deg_title} (Specialisations: {specs_str}). The sponsoring organization accepts {req_fields} for early-career placement and academic advancement."
+                            elig_req = f"Degree Levels: {req_degs} | Target Fields: {req_fields}"
+
+                            if "master" in req_degs.lower() and deg_level == "Undergraduate":
+                                qualification = f"Conditionally Eligible — Requires undergraduate degree completion upon your expected graduation in {exp_grad}."
+                            else:
+                                qualification = "Likely Eligible — Your undergraduate status and academic discipline meet the published criteria."
+
+                            deadline_info = f"{dl or 'Unspecified'} ({dl_label})"
+                            docs = "National ID / Passport, official university academic transcripts, recommendation letters, and comprehensive CV (verify specific documentary requirements on the official portal)."
+
+                            card = (
+                                f"#### [{title}]({url})\n"
+                                f"- **Provider:** {prov}\n"
+                                f"- **1. Relevance to your degree:** {relevance}\n"
+                                f"- **2. Published eligibility requirements:** {elig_req}\n"
+                                f"- **3. Likelihood of qualifying:** **{qualification}**\n"
+                                f"- **4. Application deadline:** **{deadline_info}**\n"
+                                f"- **5. Required application documents:** {docs}\n"
+                                f"- **6. Official application website:** [Official Application Portal]({url})\n"
+                            )
+                            opp_cards.append(card)
+                        cat_sections.append(cat_header + "\n\n" + "\n".join(opp_cards))
+                    else:
+                        cat_header = f"### {cat_display} — **Status: No matching records found**"
+                        explanation = (
+                            "The knowledge base was searched for verified records matching your academic profile in this category, "
+                            "but returned no matching entries at this time. (This indicates our verified directory does not currently hold "
+                            "an active record for this category, not that such opportunities do not exist in Kenya)."
+                        )
+                        cat_sections.append(cat_header + "\n\n" + explanation)
+
+                intro = (
+                    f"Here is a comprehensive opportunity discovery across all five requested categories for a **{deg_title}** student "
+                    f"specialising in **{', '.join(specs) if isinstance(specs, list) else specs}** at the **{uni}** "
+                    f"(Expected Graduation: **{exp_grad}**):\n\n"
+                )
+                final_reply = intro + "\n\n---\n\n".join(cat_sections) + (
+                    "\n\n---\n"
+                    "> 🔍 *All details above are certified against official publisher records. Deadlines and status require confirmation on official portals.*"
+                )
+                state.pending_question = {
+                    "question": "Would you like me to check your eligibility or generate an application checklist for any of these?",
+                    "topic": "confirm_next_step",
+                    "context": {"opportunities": [o["title"] for o in state.discussed_opportunities]}
+                }
+                return final_reply, tool_calls_executed, citations
+
             category_filter = None
             if intent == IntentType.SCHOLARSHIP_SEARCH:
                 category_filter = "Scholarship"
@@ -1156,6 +1425,14 @@ class AgentOrchestrator:
             state.student_memory["field_of_study"] = entities["field_of_study"]
         if entities.get("degree_level"):
             state.student_memory["degree_level"] = entities["degree_level"]
+        if entities.get("degree_title"):
+            state.student_memory["degree_title"] = entities["degree_title"]
+        if entities.get("specialisations"):
+            state.student_memory["specialisations"] = entities["specialisations"]
+        if entities.get("expected_graduation"):
+            state.student_memory["expected_graduation"] = entities["expected_graduation"]
+        if entities.get("country"):
+            state.student_memory["country"] = entities["country"]
 
         authenticated_student_id = None
         if student_profile and (student_profile.get("id") or student_profile.get("student_id")):

@@ -10,7 +10,7 @@ export default function AuthModal({ isOpen, onClose, user, onAuthSuccess, onLogo
   const [fullName, setFullName] = useState('');
   const [adminSecret, setAdminSecret] = useState('');
   const [university, setUniversity] = useState('University of Nairobi');
-  const [fieldOfStudy, setFieldOfStudy] = useState('Computer Science');
+  const [fieldOfStudy, setFieldOfStudy] = useState('');
   const [degreeLevel, setDegreeLevel] = useState('Undergraduate');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);

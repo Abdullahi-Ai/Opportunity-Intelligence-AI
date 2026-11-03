@@ -4,7 +4,7 @@ import { api } from '../api/client';
 
 export default function EligibilityChecker({ opportunity, student, onClose, onSave, isTracked }) {
   const [degreeLevel, setDegreeLevel] = useState(student?.degree_level || 'Undergraduate');
-  const [fieldOfStudy, setFieldOfStudy] = useState(student?.field_of_study || 'Computer Science');
+  const [fieldOfStudy, setFieldOfStudy] = useState(student?.field_of_study || '');
   const [yearOfStudy, setYearOfStudy] = useState(student?.year_of_study || 3);
   const [kcseGrade, setKcseGrade] = useState(student?.gpa_or_grade || 'B+');
   

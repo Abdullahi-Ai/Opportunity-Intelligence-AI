@@ -85,7 +85,7 @@ KNOWN_PROVIDERS = {
 }
 
 def extract_entities(text: str) -> Dict[str, Any]:
-    """Extracts mentioned organizations, study levels, courses, and year of study."""
+    """Extracts mentioned organizations, study levels, courses, degree titles, specialisations, graduation dates, and country."""
     clean = text.lower()
     entities: Dict[str, Any] = {
         "opportunity_id": None,
@@ -93,8 +93,32 @@ def extract_entities(text: str) -> Dict[str, Any]:
         "university": None,
         "field_of_study": None,
         "degree_level": None,
-        "year_of_study": None
+        "year_of_study": None,
+        "degree_title": None,
+        "specialisations": [],
+        "expected_graduation": None,
+        "country": None
     }
+
+    # Extract full degree title e.g. "Bachelor of Arts in Social Sciences"
+    degree_match = re.search(r'\b((?:bachelor|master|diploma|doctor|phd)\s+of\s+[a-zA-Z\s]+?)(?:,|\.|\bat\b|\bspecialising\b|\bspecializing\b|\bwith\b|\bexpected\b|$)', text, re.IGNORECASE)
+    if degree_match:
+        entities["degree_title"] = degree_match.group(1).strip()
+
+    # Extract distinct specialisations e.g. "Sociology and Psychology" -> ["Sociology", "Psychology"]
+    spec_match = re.search(r'\b(?:specialising|specializing|majoring|major|study)\s+(?:in\s+)?([a-zA-Z\s,&]+?)(?:,|\.|\bnot\b|\binstead of\b|\bat\b|\bexpected\b|\bgraduating\b|\bfind\b|$)', text, re.IGNORECASE)
+    if spec_match:
+        raw_specs = spec_match.group(1).strip()
+        parts = re.split(r'\s+and\s+|,\s*', raw_specs)
+        entities["specialisations"] = [p.strip().title() for p in parts if p.strip()]
+
+    # Extract expected graduation e.g. "December 2026" or "2026"
+    grad_match = re.search(r'\b(?:expect(?:ing)? to graduate|expected graduation|graduating)(?:\s+in)?\s+([a-zA-Z]+\s+\d{4}|\d{4})\b', text, re.IGNORECASE)
+    if grad_match:
+        entities["expected_graduation"] = grad_match.group(1).strip()
+
+    if re.search(r'\b(kenya|kenyan)\b', clean):
+        entities["country"] = "Kenya"
 
     for kw, opp_id in KNOWN_PROVIDERS.items():
         if re.search(r'\b' + re.escape(kw) + r'\b', clean):
@@ -138,15 +162,30 @@ def extract_entities(text: str) -> Dict[str, Any]:
         entities["degree_level"] = "PhD"
 
     field_patterns = [
-        (r'\b(computer science|cs|computing|software engineering|it|information technology)\b', 'Computer Science'),
+        (r'\b(social sciences?|sociology|psychology|humanities|arts|political science|anthropology|philosophy)\b', 'Social Sciences & Humanities'),
+        (r'\b(computer science|cs|computing|software engineering|information technology|ict|degree in it|studying it|major in it)\b', 'Computer Science'),
         (r'\b(engineering|electrical engineering|civil engineering|mechanical engineering)\b', 'Engineering'),
         (r'\b(business|commerce|economics|finance|accounting)\b', 'Business & Economics'),
         (r'\b(law|llb)\b', 'Law'),
         (r'\b(medicine|nursing|pharmacy|health)\b', 'Health Sciences'),
+        (r'\b(education|teaching|pedagogy)\b', 'Education'),
         (r'\b(agriculture|agribusiness)\b', 'Agriculture')
     ]
+
+    # Handle explicit affirmative statements: 'i study X', 'studying X', 'major in X', 'specialising in X', 'pursuing X'
+    study_match = re.search(r'\b(i study|studying|major in|specialising in|specializing in|pursuing a degree in|pursuing|degree in)\s+([a-zA-Z\s&]+?)(?:,|\.|\band\b|not|$)', clean)
+    if study_match:
+        subject = study_match.group(2).strip()
+        for pattern, field in field_patterns:
+            if re.search(pattern, subject):
+                entities["field_of_study"] = field
+                return entities
+
+    # Filter out negated expressions (e.g. 'not computer science', 'instead of cs')
+    clean_filtered = re.sub(r'\b(not|instead of)\s+([a-zA-Z\s]+?)(?:,|\.|$)', '', clean)
+
     for pattern, field in field_patterns:
-        if re.search(pattern, clean):
+        if re.search(pattern, clean_filtered):
             entities["field_of_study"] = field
             break
 
@@ -258,6 +297,22 @@ def classify_intent(
     conversational_phrases = ["who are you", "what are you", "what can you do", "introduce yourself", "tell me about yourself", "how does this work", "how do you work"]
     if clean in greetings or any(phrase in clean for phrase in conversational_phrases) or (len(tokens) <= 2 and any(t in greetings for t in tokens)):
         return IntentType.GREETING_SOCIAL, {"entities": entities}
+
+    compound_categories = [
+        r'\bscholarships?\b',
+        r'\binternships?\b',
+        r'\bfellowships?\b',
+        r'\battachments?\b',
+        r'\bgraduate (trainee|programme|program)\b',
+        r'\bresearch opportunit(y|ies)\b',
+        r'\bcareer development\b',
+        r'\bopportunit(y|ies)\b'
+    ]
+    matched_cat_count = sum(1 for p in compound_categories if re.search(p, clean))
+    has_disc_action = bool(re.search(r'\b(find|search|show|explore|look for|list|give me|recommend|available|prioritise|prioritize)\b', clean))
+
+    if has_disc_action and (matched_cat_count >= 2 or re.search(r'\bopportunit(y|ies)\b', clean)):
+        return IntentType.OPPORTUNITY_DISCOVERY, {"entities": entities}
 
     discovery_patterns = [
         r'\bi need some (of the )?opportunit(y|ies)\b',
@@ -373,6 +428,16 @@ def classify_intent(
     ]
     for pattern in eligibility_patterns:
         if re.search(pattern, clean):
+            if has_disc_action and not entities.get("opportunity_id"):
+                if re.search(r'\b(scholarship|scholarships|bursary|bursaries)\b', clean):
+                    return IntentType.SCHOLARSHIP_SEARCH, {"entities": entities}
+                if re.search(r'\b(attachment|internship|internships|practicum)\b', clean):
+                    return IntentType.INTERNSHIP_SEARCH, {"entities": entities}
+                if re.search(r'\b(fellowship|fellowships)\b', clean):
+                    return IntentType.FELLOWSHIP_SEARCH, {"entities": entities}
+                if re.search(r'\b(graduate trainee|graduate programme)\b', clean):
+                    return IntentType.GRADUATE_PROGRAMME_SEARCH, {"entities": entities}
+                return IntentType.OPPORTUNITY_DISCOVERY, {"entities": entities}
             return IntentType.ELIGIBILITY_ASSESSMENT, {"entities": entities}
 
     deadline_patterns = [

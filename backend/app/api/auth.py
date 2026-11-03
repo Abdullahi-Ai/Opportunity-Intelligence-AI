@@ -2,7 +2,7 @@
 Supports student onboarding, secure administrator registration with verification secrets,
 and JWT token generation.
 """
-from typing import Optional
+from typing import Optional, List, Union
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, EmailStr
@@ -25,8 +25,12 @@ class UserRegisterRequest(BaseModel):
     admin_secret: Optional[str] = Field(default=None, description="Secret token required for admin role verification")
     
     university: Optional[str] = "University of Nairobi"
-    field_of_study: Optional[str] = "Computer Science"
+    field_of_study: Optional[str] = "General"
     degree_level: Optional[str] = "Undergraduate"
+    degree_title: Optional[str] = None
+    specialisations: Optional[Union[List[str], str]] = None
+    expected_graduation: Optional[str] = None
+    country: Optional[str] = "Kenya"
     year_of_study: Optional[int] = 1
     graduation_year: Optional[int] = 2026
 
@@ -39,6 +43,10 @@ class StudentProfileBrief(BaseModel):
     university: str
     field_of_study: str
     degree_level: str
+    degree_title: Optional[str] = None
+    specialisations: Optional[Union[List[str], str]] = None
+    expected_graduation: Optional[str] = None
+    country: Optional[str] = "Kenya"
     graduation_year: Optional[int] = None
 
 class UserResponse(BaseModel):

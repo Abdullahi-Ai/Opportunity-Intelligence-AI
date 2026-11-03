@@ -9,7 +9,7 @@ Provides complete CRUD APIs for:
 """
 
 import uuid
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 from datetime import datetime, date
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, ConfigDict
@@ -100,6 +100,10 @@ class StudentProfileCreate(BaseModel):
     university: str
     field_of_study: str
     degree_level: str
+    degree_title: Optional[str] = None
+    specialisations: Optional[Union[List[str], str]] = None
+    expected_graduation: Optional[str] = None
+    country: Optional[str] = "Kenya"
     year_of_study: int
     graduation_year: Optional[int] = None
     county_of_origin: Optional[str] = None

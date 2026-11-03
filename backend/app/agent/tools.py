@@ -187,17 +187,27 @@ def tool_search_opportunities(
 class DeadlineCountdownInput(BaseModel):
     deadline_date_str: Optional[str] = Field(default=None, description="ISO format deadline string YYYY-MM-DD (e.g. '2026-11-30') or None/empty for rolling")
     deadline_str: Optional[str] = Field(default=None, description="Alias for deadline_date_str")
+    is_officially_verified: bool = Field(default=False, description="Whether deadline was independently checked against official organization live source")
+    verification_source: Optional[str] = Field(default=None, description="Official portal/organization where verification occurred")
+    verification_date: Optional[str] = Field(default=None, description="ISO date when official verification took place")
 
 def tool_calculate_deadline_countdown(input_data: DeadlineCountdownInput) -> Dict[str, Any]:
     """
-    Deterministically computes days remaining and status using Python calendar arithmetic.
+    Deterministically computes days remaining, application status, and provenance.
     NEVER relies on LLM date arithmetic to prevent hallucinations.
-    Handles missing deadlines, rolling admissions, expired dates, and boundary cases.
+    Enforces clear deadline provenance:
+    1. Officially verified
+    2. Recorded in directory — requires official verification
+    3. Deadline unavailable
+    4. Application status unconfirmed
     """
     today = date.today()
     raw_date = input_data.deadline_date_str or input_data.deadline_str
 
     if not raw_date or str(raw_date).strip().lower() in ["unspecified", "rolling", "none", "n/a", ""]:
+        is_rolling = str(raw_date or "").strip().lower() == "rolling"
+        provenance = "Recorded in directory — requires official verification" if is_rolling else "Deadline unavailable"
+        app_status = "Rolling / Continuous intake" if is_rolling else "Application status unconfirmed"
         return {
             "status": "unspecified",
             "is_open": True,
@@ -205,8 +215,10 @@ def tool_calculate_deadline_countdown(input_data: DeadlineCountdownInput) -> Dic
             "today": str(today),
             "days_remaining": None,
             "days_ago": None,
+            "deadline_provenance": provenance,
+            "application_status_provenance": app_status,
             "status_label": "Rolling / Open",
-            "summary": "No fixed deadline published (rolling admissions or continuous intake)."
+            "summary": f"No fixed deadline published (rolling admissions or continuous intake). [{provenance}]"
         }
 
     clean_str = str(raw_date).strip()
@@ -220,15 +232,20 @@ def tool_calculate_deadline_countdown(input_data: DeadlineCountdownInput) -> Dic
             "today": str(today),
             "days_remaining": None,
             "days_ago": None,
+            "deadline_provenance": "Deadline unavailable",
+            "application_status_provenance": "Application status unconfirmed",
             "status_label": "Invalid date",
             "message": f"Invalid date format '{clean_str}'. Expected YYYY-MM-DD.",
             "summary": f"Could not compute countdown: '{clean_str}' is not in YYYY-MM-DD format."
         }
 
+    provenance = "Officially verified" if input_data.is_officially_verified else "Recorded in directory — requires official verification"
+    app_status = "Officially confirmed" if input_data.is_officially_verified else "Application status unconfirmed"
     delta_days = (target_date - today).days
 
     if delta_days < 0:
         days_ago = abs(delta_days)
+        label_text = f"Expired ({days_ago}d ago)" if days_ago > 1 else "Expired yesterday"
         return {
             "status": "expired",
             "is_open": False,
@@ -236,8 +253,12 @@ def tool_calculate_deadline_countdown(input_data: DeadlineCountdownInput) -> Dic
             "today": str(today),
             "days_remaining": -days_ago,
             "days_ago": days_ago,
-            "status_label": f"Expired ({days_ago}d ago)" if days_ago > 1 else "Expired yesterday",
-            "summary": f"This opportunity closed {days_ago} days ago on {target_date}."
+            "deadline_provenance": provenance,
+            "application_status_provenance": app_status,
+            "verification_source": input_data.verification_source,
+            "verification_date": input_data.verification_date,
+            "status_label": f"{label_text} — {provenance}",
+            "summary": f"This opportunity closed {days_ago} days ago on {target_date}. ({provenance})"
         }
     elif delta_days == 0:
         return {
@@ -247,8 +268,12 @@ def tool_calculate_deadline_countdown(input_data: DeadlineCountdownInput) -> Dic
             "today": str(today),
             "days_remaining": 0,
             "days_ago": 0,
-            "status_label": "Closing today!",
-            "summary": "Deadline is TODAY! Ensure final submission before midnight."
+            "deadline_provenance": provenance,
+            "application_status_provenance": app_status,
+            "verification_source": input_data.verification_source,
+            "verification_date": input_data.verification_date,
+            "status_label": f"Closing today! ({target_date}) — {provenance}",
+            "summary": f"Deadline is TODAY! Ensure final submission before midnight. ({provenance})"
         }
     elif delta_days == 1:
         return {
@@ -258,8 +283,12 @@ def tool_calculate_deadline_countdown(input_data: DeadlineCountdownInput) -> Dic
             "today": str(today),
             "days_remaining": 1,
             "days_ago": 0,
-            "status_label": "1 day left (Tomorrow)",
-            "summary": f"1 day remaining until the deadline on {target_date}."
+            "deadline_provenance": provenance,
+            "application_status_provenance": app_status,
+            "verification_source": input_data.verification_source,
+            "verification_date": input_data.verification_date,
+            "status_label": f"1 day left (Tomorrow) — {provenance}",
+            "summary": f"1 day remaining until deadline on {target_date}. ({provenance})"
         }
     else:
         return {
@@ -269,8 +298,12 @@ def tool_calculate_deadline_countdown(input_data: DeadlineCountdownInput) -> Dic
             "today": str(today),
             "days_remaining": delta_days,
             "days_ago": 0,
-            "status_label": f"{delta_days} days left",
-            "summary": f"{delta_days} day(s) remaining until the deadline on {target_date}."
+            "deadline_provenance": provenance,
+            "application_status_provenance": app_status,
+            "verification_source": input_data.verification_source,
+            "verification_date": input_data.verification_date,
+            "status_label": f"{delta_days} days left — {provenance}",
+            "summary": f"{delta_days} day(s) remaining until deadline on {target_date}. ({provenance})"
         }
 
 class AssessEligibilityInput(BaseModel):
@@ -361,7 +394,9 @@ def tool_assess_eligibility(input_data: AssessEligibilityInput, db: Optional[Ses
         })
 
     student_field = input_data.student_field_of_study.lower()
-    if not allowed_fields or "all fields" in allowed_fields or any(f in student_field or student_field in f for f in allowed_fields):
+    has_universal_field = any(any(kw in f for kw in ["all fields", "all disciplines", "all academic disciplines", "any discipline", "open to all"]) for f in allowed_fields)
+    is_universal_student = any(kw in student_field for kw in ["all fields", "all disciplines", "all academic disciplines", "general"])
+    if not allowed_fields or has_universal_field or is_universal_student or any(f in student_field or student_field in f for f in allowed_fields):
         evaluations.append({
             "criterion": "Field of Study",
             "required": meta.get("fields_of_study"),
