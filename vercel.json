@@ -1,10 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "rm -rf api/app && cp -r backend/app api/",
   "functions": {
     "api/index.py": {
       "memory": 1024,
-      "maxDuration": 60,
-      "includeFiles": "backend/**"
+      "maxDuration": 60
     }
   },
   "rewrites": [

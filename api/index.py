@@ -2,13 +2,17 @@ import sys
 from pathlib import Path
 
 # Discover backend directory across both local workspace and Vercel Lambda container:
-# 1. Container runtime: /var/task/backend (parent of /var/task/index.py)
-# 2. Local workspace: <repo_root>/backend (parent.parent of api/index.py)
-# 3. Process CWD fallback: Path.cwd() / "backend"
+# 1. current_dir: /var/task (when app/ is inside api/)
+# 2. current_dir / "backend": container fallback
+# 3. current_dir.parent / "backend": <repo_root>/backend (local workspace fallback)
+# 4. Path.cwd(): process working directory
+# 5. Path.cwd() / "backend": CWD backend fallback
 current_dir = Path(__file__).resolve().parent
 candidates = [
+    current_dir,
     current_dir / "backend",
     current_dir.parent / "backend",
+    Path.cwd(),
     Path.cwd() / "backend",
 ]
 
