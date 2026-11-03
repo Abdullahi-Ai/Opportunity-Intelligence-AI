@@ -8,6 +8,7 @@ Provides complete CRUD APIs for:
 5. Student Dashboard Metrics & Analytics
 """
 
+import os
 import uuid
 from typing import List, Optional, Dict, Any, Union
 from datetime import datetime, date
@@ -16,6 +17,7 @@ from pydantic import BaseModel, Field, ConfigDict
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_, func
 
+from app.config import settings
 from app.db.session import get_db, Base, engine
 from app.models.entities import User, StudentProfile, Opportunity, TrackedApplication, ApplicationChecklist
 from app.core.auth import get_current_user
@@ -26,7 +28,10 @@ from app.agent.tools import (
     GenerateChecklistInput
 )
 
-if engine.dialect.name == "sqlite":
+is_production_env = settings.APP_ENV.lower() in ["production", "prod", "staging"]
+is_serverless_env = bool(os.environ.get("VERCEL"))
+
+if engine.dialect.name == "sqlite" and not is_production_env and not is_serverless_env:
     Base.metadata.create_all(bind=engine)
 
 router = APIRouter(prefix="/api/v1", tags=["Application Data & Tracking"])

@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     
     @model_validator(mode="after")
     def validate_production_secrets_and_paths(self):
+        # Support POSTGRES_URL fallback only when DATABASE_URL is genuinely absent from environment
+        if not os.environ.get("DATABASE_URL") and os.environ.get("POSTGRES_URL"):
+            self.DATABASE_URL = os.environ["POSTGRES_URL"].strip()
+
         is_production = self.APP_ENV.lower() in ["production", "prod", "staging"]
         insecure_secret_keys = {
             "super_secret_development_key_not_for_production_32chars",
@@ -80,6 +84,20 @@ class Settings(BaseSettings):
             if "*" in cors_origins:
                 raise ValueError(
                     "CRITICAL SECURITY CONFIGURATION ERROR: Wildcard origin '*' is strictly prohibited in production when credentials are enabled."
+                )
+
+            # Fail-closed production database enforcement
+            db_url_clean = (self.DATABASE_URL or "").strip()
+            valid_pg_schemes = (
+                "postgresql://",
+                "postgres://",
+                "postgresql+psycopg2://",
+                "postgresql+psycopg://",
+            )
+            if not db_url_clean or not any(db_url_clean.startswith(prefix) for prefix in valid_pg_schemes):
+                raise ValueError(
+                    "CRITICAL DATABASE CONFIGURATION ERROR: A valid PostgreSQL DATABASE_URL must be configured in "
+                    "production-like environments (production, prod, staging). SQLite and empty URLs are strictly prohibited."
                 )
 
         chroma_path = Path(self.CHROMA_PERSIST_DIRECTORY)
