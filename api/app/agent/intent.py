@@ -1,0 +1,511 @@
+"""Intent Classification and Conversational Context Resolution Module.
+Implements distinct intent categories with deterministic rule priority,
+contextual entity extraction, and pending-question resolution.
+"""
+
+import re
+from enum import Enum
+from typing import Dict, Any, List, Optional, Tuple
+
+class IntentType(str, Enum):
+    GREETING_SOCIAL = "greeting_social"
+    THANK_YOU = "thank_you"
+    AMBIGUOUS_INCOMPLETE = "ambiguous_incomplete"
+    OPPORTUNITY_DISCOVERY = "opportunity_discovery"
+    SCHOLARSHIP_SEARCH = "scholarship_search"
+    INTERNSHIP_SEARCH = "internship_search"
+    GRADUATE_PROGRAMME_SEARCH = "graduate_programme_search"
+    FELLOWSHIP_SEARCH = "fellowship_search"
+    FIELD_SEARCH = "field_search"
+    EXPLAIN_REQUIREMENTS = "explain_requirements"
+    ELIGIBILITY_ASSESSMENT = "eligibility_assessment"
+    DEADLINE_INQUIRY = "deadline_inquiry"
+    OPPORTUNITY_COMPARISON = "opportunity_comparison"
+    APPLICATION_PLANNING = "application_planning"
+    CHECKLIST_GENERATION = "checklist_generation"
+    TRACKING_PROGRESS = "tracking_progress"
+    FOLLOW_UP_QUESTION = "follow_up_question"
+    PREFERENCE_UPDATE = "preference_update"
+    GENERAL_GUIDANCE = "general_guidance"
+    OUT_OF_SCOPE = "out_of_scope"
+
+KNOWN_PROVIDERS = {
+    "safaricom": "opp-safaricom-attachment-2026",
+    "safaricom attachment": "opp-safaricom-attachment-2026",
+    "safaricom internship": "opp-safaricom-attachment-2026",
+    "safaricom graduate": "opp-safaricom-discover-gt-2026",
+    "safaricom discover": "opp-safaricom-discover-gt-2026",
+    "discover graduate": "opp-safaricom-discover-gt-2026",
+
+    "kra": "opp-kra-internship-2026",
+    "kenya revenue authority": "opp-kra-internship-2026",
+    "kra internship": "opp-kra-internship-2026",
+
+    "hef": "opp-hef-undergraduate-2026",
+    "higher education financing": "opp-hef-undergraduate-2026",
+    "helb": "opp-hef-undergraduate-2026",
+
+    "chevening": "opp-chevening-kenya-2027",
+    "chevening scholarship": "opp-chevening-kenya-2027",
+    "chevening kenya": "opp-chevening-kenya-2027",
+
+    "daad": "opp-daad-region-kenya-2027",
+    "daad scholarship": "opp-daad-region-kenya-2027",
+
+    "equity": "opp-equity-leaders-elp-2026",
+    "equity leaders": "opp-equity-leaders-elp-2026",
+    "elp": "opp-equity-leaders-elp-2026",
+    "wings to fly": "opp-equity-leaders-elp-2026",
+
+    "kcb": "opp-kcb-foundation-tertiary-2026",
+    "2jiajiri": "opp-kcb-foundation-tertiary-2026",
+    "kcb foundation": "opp-kcb-foundation-tertiary-2026",
+
+    "mawazo": "opp-mawazo-fellowship-2027",
+    "mawazo institute": "opp-mawazo-fellowship-2027",
+    "mawazo fellowship": "opp-mawazo-fellowship-2027",
+
+    "hult prize": "opp-hult-prize-kenya-2026",
+
+    "un gigiri": "opp-un-gigiri-internship-2026",
+    "united nations": "opp-un-gigiri-internship-2026",
+
+    "pdtp": "opp-pdtp-digika-2026",
+    "presidential digital": "opp-pdtp-digika-2026",
+    "digika": "opp-pdtp-digika-2026",
+    "presidential digital talent": "opp-pdtp-digika-2026",
+
+    "psip": "opp-psc-psip-internship-2026",
+    "public service": "opp-psc-psip-internship-2026",
+    "public service commission": "opp-psc-psip-internship-2026",
+    "psip internship": "opp-psc-psip-internship-2026",
+
+    "mastercard": "opp-mastercard-fdn-usiu-2026",
+    "mastercard foundation": "opp-mastercard-fdn-usiu-2026"
+}
+
+def extract_entities(text: str) -> Dict[str, Any]:
+    """Extracts mentioned organizations, study levels, courses, degree titles, specialisations, graduation dates, and country."""
+    clean = text.lower()
+    entities: Dict[str, Any] = {
+        "opportunity_id": None,
+        "provider_keyword": None,
+        "university": None,
+        "field_of_study": None,
+        "degree_level": None,
+        "year_of_study": None,
+        "degree_title": None,
+        "specialisations": [],
+        "expected_graduation": None,
+        "country": None
+    }
+
+    # Extract full degree title e.g. "Bachelor of Arts in Social Sciences"
+    degree_match = re.search(r'\b((?:bachelor|master|diploma|doctor|phd)\s+of\s+[a-zA-Z\s]+?)(?:,|\.|\bat\b|\bspecialising\b|\bspecializing\b|\bwith\b|\bexpected\b|$)', text, re.IGNORECASE)
+    if degree_match:
+        entities["degree_title"] = degree_match.group(1).strip()
+
+    # Extract distinct specialisations e.g. "Sociology and Psychology" -> ["Sociology", "Psychology"]
+    spec_match = re.search(r'\b(?:specialising|specializing|majoring|major|study)\s+(?:in\s+)?([a-zA-Z\s,&]+?)(?:,|\.|\bnot\b|\binstead of\b|\bat\b|\bexpected\b|\bgraduating\b|\bfind\b|$)', text, re.IGNORECASE)
+    if spec_match:
+        raw_specs = spec_match.group(1).strip()
+        parts = re.split(r'\s+and\s+|,\s*', raw_specs)
+        entities["specialisations"] = [p.strip().title() for p in parts if p.strip()]
+
+    # Extract expected graduation e.g. "December 2026" or "2026"
+    grad_match = re.search(r'\b(?:expect(?:ing)? to graduate|expected graduation|graduating)(?:\s+in)?\s+([a-zA-Z]+\s+\d{4}|\d{4})\b', text, re.IGNORECASE)
+    if grad_match:
+        entities["expected_graduation"] = grad_match.group(1).strip()
+
+    if re.search(r'\b(kenya|kenyan)\b', clean):
+        entities["country"] = "Kenya"
+
+    for kw, opp_id in KNOWN_PROVIDERS.items():
+        if re.search(r'\b' + re.escape(kw) + r'\b', clean):
+            entities["opportunity_id"] = opp_id
+            entities["provider_keyword"] = kw
+            break
+
+    uni_patterns = [
+        (r'\b(uon|university of nairobi)\b', 'University of Nairobi'),
+        (r'\b(ku|kenyatta university)\b', 'Kenyatta University'),
+        (r'\b(jkuat|jomo kenyatta)\b', 'JKUAT'),
+        (r'\b(strathmore|strathmore university)\b', 'Strathmore University'),
+        (r'\b(moi university|moi)\b', 'Moi University'),
+        (r'\b(egerton|egerton university)\b', 'Egerton University'),
+        (r'\b(usiu|usiu-africa)\b', 'USIU-Africa')
+    ]
+    for pattern, name in uni_patterns:
+        if re.search(pattern, clean):
+            entities["university"] = name
+            break
+
+    yr_patterns = [
+        (r'\b(first[\s\-]year|1st[\s\-]year|year\s*1)\b', 1),
+        (r'\b(second[\s\-]year|2nd[\s\-]year|year\s*2)\b', 2),
+        (r'\b(third[\s\-]year|3rd[\s\-]year|year\s*3)\b', 3),
+        (r'\b(fourth[\s\-]year|4th[\s\-]year|year\s*4)\b', 4),
+        (r'\b(fifth[\s\-]year|5th[\s\-]year|year\s*5)\b', 5)
+    ]
+    for pattern, yr in yr_patterns:
+        if re.search(pattern, clean):
+            entities["year_of_study"] = yr
+            break
+
+    if re.search(r'\b(undergrad|undergraduate|bachelor|bachelors|degree)\b', clean):
+        entities["degree_level"] = "Undergraduate"
+    elif re.search(r'\b(diploma|cert|certificate)\b', clean):
+        entities["degree_level"] = "Diploma"
+    elif re.search(r'\b(master|masters|msc|mba|postgraduate)\b', clean):
+        entities["degree_level"] = "Masters"
+    elif re.search(r'\b(phd|doctorate)\b', clean):
+        entities["degree_level"] = "PhD"
+
+    field_patterns = [
+        (r'\b(social sciences?|sociology|psychology|humanities|arts|political science|anthropology|philosophy)\b', 'Social Sciences & Humanities'),
+        (r'\b(computer science|cs|computing|software engineering|information technology|ict|degree in it|studying it|major in it)\b', 'Computer Science'),
+        (r'\b(engineering|electrical engineering|civil engineering|mechanical engineering)\b', 'Engineering'),
+        (r'\b(business|commerce|economics|finance|accounting)\b', 'Business & Economics'),
+        (r'\b(law|llb)\b', 'Law'),
+        (r'\b(medicine|nursing|pharmacy|health)\b', 'Health Sciences'),
+        (r'\b(education|teaching|pedagogy)\b', 'Education'),
+        (r'\b(agriculture|agribusiness)\b', 'Agriculture')
+    ]
+
+    # Handle explicit affirmative statements: 'i study X', 'studying X', 'major in X', 'specialising in X', 'pursuing X'
+    study_match = re.search(r'\b(i study|studying|major in|specialising in|specializing in|pursuing a degree in|pursuing|degree in)\s+([a-zA-Z\s&]+?)(?:,|\.|\band\b|not|$)', clean)
+    if study_match:
+        subject = study_match.group(2).strip()
+        for pattern, field in field_patterns:
+            if re.search(pattern, subject):
+                entities["field_of_study"] = field
+                return entities
+
+    # Filter out negated expressions (e.g. 'not computer science', 'instead of cs')
+    clean_filtered = re.sub(r'\b(not|instead of)\s+([a-zA-Z\s]+?)(?:,|\.|$)', '', clean)
+
+    for pattern, field in field_patterns:
+        if re.search(pattern, clean_filtered):
+            entities["field_of_study"] = field
+            break
+
+    return entities
+
+def resolve_contextual_reply(
+    message: str,
+    pending_question: Optional[Dict[str, Any]]
+) -> Tuple[Optional[IntentType], Optional[Dict[str, Any]]]:
+    """Checks if student is answering an explicit question previously asked by assistant."""
+    if not pending_question:
+        return None, None
+
+    clean = message.strip().lower()
+    q_topic = pending_question.get("topic")
+    q_context = pending_question.get("context", {})
+
+    if clean in ["yes", "yeah", "yep", "sure", "please", "proceed", "create it", "do it"]:
+        if q_topic == "confirm_checklist":
+            return IntentType.CHECKLIST_GENERATION, q_context
+        if q_topic == "confirm_eligibility":
+            return IntentType.ELIGIBILITY_ASSESSMENT, q_context
+
+    if clean in ["both", "kenya", "abroad", "international", "local"]:
+        if q_topic == "clarify_destination":
+            resolved_context = {**q_context, "destination_preference": clean}
+            target_category = q_context.get("target_category", "scholarship")
+            intent = IntentType.SCHOLARSHIP_SEARCH if target_category == "scholarship" else IntentType.OPPORTUNITY_DISCOVERY
+            return intent, resolved_context
+
+    category_map = {
+        "1": "scholarship",
+        "scholarships": "scholarship",
+        "scholarship": "scholarship",
+        "2": "internship",
+        "internships": "internship",
+        "internship": "internship",
+        "attachment": "internship",
+        "attachments": "internship",
+        "3": "graduate_trainee",
+        "graduate": "graduate_trainee",
+        "jobs": "graduate_trainee",
+        "4": "fellowship",
+        "fellowships": "fellowship",
+        "research": "fellowship"
+    }
+    if q_topic == "clarify_category" and clean in category_map:
+        cat = category_map[clean]
+        if cat == "scholarship":
+            return IntentType.SCHOLARSHIP_SEARCH, q_context
+        elif cat == "internship":
+            return IntentType.INTERNSHIP_SEARCH, q_context
+        elif cat == "graduate_trainee":
+            return IntentType.GRADUATE_PROGRAMME_SEARCH, q_context
+        elif cat == "fellowship":
+            return IntentType.FELLOWSHIP_SEARCH, q_context
+
+    if q_topic == "ask_university":
+        extracted = extract_entities(message)
+        if extracted.get("university"):
+            return IntentType.PREFERENCE_UPDATE, {"university": extracted["university"], "next_action": q_context.get("next_action")}
+
+    if q_topic == "ask_year":
+        extracted = extract_entities(message)
+        if extracted.get("year_of_study"):
+            return IntentType.PREFERENCE_UPDATE, {"year_of_study": extracted["year_of_study"], "next_action": q_context.get("next_action")}
+
+    return None, None
+
+def classify_intent(
+    message: str,
+    pending_question: Optional[Dict[str, Any]] = None,
+    recently_discussed: Optional[List[Dict[str, Any]]] = None
+) -> Tuple[IntentType, Dict[str, Any]]:
+    """Classifies user message into one of the specialized intent categories.
+
+    Returns: (IntentType, metadata_dict)
+    """
+    clean = message.strip().lower()
+    tokens = re.sub(r'[^\w\s]', '', clean).split()
+    entities = extract_entities(message)
+
+    if pending_question:
+        resolved_intent, resolved_ctx = resolve_contextual_reply(message, pending_question)
+        if resolved_intent:
+            return resolved_intent, {
+                "resolved_from_pending": True,
+                "pending_topic": pending_question.get("topic"),
+                "context": resolved_ctx,
+                "entities": entities
+            }
+
+    out_of_scope_patterns = [
+        r'\b(rocket|mars|astronomy|spacecraft)\b',
+        r'\b(hack|crack|bypass password|exploit)\b',
+        r'\b(write a poem|write code for|write python script)\b',
+        r'\b(recipe|cook|restaurant in paris)\b',
+        r'\b(passport|driving license|lottery|crypto|bitcoin)\b'
+    ]
+    for pattern in out_of_scope_patterns:
+        if re.search(pattern, clean):
+            return IntentType.OUT_OF_SCOPE, {"entities": entities}
+
+    thank_you_phrases = ["thank you", "thanks", "asante", "shukran", "appreciated", "appreciate it", "many thanks", "thank you so much", "thx"]
+    if clean in thank_you_phrases or any(clean.startswith(p) for p in ["thank you", "thanks", "asante"]):
+        return IntentType.THANK_YOU, {"entities": entities}
+
+    greetings = {"hello", "hi", "hey", "habari", "sasa", "jambo", "howdy", "sup", "yo", "morning", "good morning", "good evening", "good afternoon"}
+    conversational_phrases = ["who are you", "what are you", "what can you do", "introduce yourself", "tell me about yourself", "how does this work", "how do you work"]
+    if clean in greetings or any(phrase in clean for phrase in conversational_phrases) or (len(tokens) <= 2 and any(t in greetings for t in tokens)):
+        return IntentType.GREETING_SOCIAL, {"entities": entities}
+
+    compound_categories = [
+        r'\bscholarships?\b',
+        r'\binternships?\b',
+        r'\bfellowships?\b',
+        r'\battachments?\b',
+        r'\bgraduate (trainee|programme|program)\b',
+        r'\bresearch opportunit(y|ies)\b',
+        r'\bcareer development\b',
+        r'\bopportunit(y|ies)\b'
+    ]
+    matched_cat_count = sum(1 for p in compound_categories if re.search(p, clean))
+    has_disc_action = bool(re.search(r'\b(find|search|show|explore|look for|list|give me|recommend|available|prioritise|prioritize)\b', clean))
+
+    if has_disc_action and (matched_cat_count >= 2 or re.search(r'\bopportunit(y|ies)\b', clean)):
+        return IntentType.OPPORTUNITY_DISCOVERY, {"entities": entities}
+
+    discovery_patterns = [
+        r'\bi need some (of the )?opportunit(y|ies)\b',
+        r'\bi need opportunit(y|ies)\b',
+        r'\bshow me (some )?opportunit(y|ies)\b',
+        r'\bwhat opportunit(y|ies)\b',
+        r'\bexplore opportunit(y|ies)\b',
+        r'\blist (some )?opportunit(y|ies)\b',
+        r'\bfind (some )?opportunit(y|ies)\b',
+        r'\bavailable opportunit(y|ies)\b',
+        r'\bany opportunit(y|ies)\b',
+        r'\bshow me more\b',
+        r'\bopportunities for me\b',
+        r'\bgive me opportunit(y|ies)\b'
+    ]
+    if any(re.search(p, clean) for p in discovery_patterns):
+        return IntentType.OPPORTUNITY_DISCOVERY, {"entities": entities}
+
+    ambiguous_keywords = {
+        "academic", "academics", "scholarship", "scholarships", "bursary", "bursaries",
+        "internship", "internships", "attachment", "attachments", "opportunities", "opportunity",
+        "help", "apply", "info", "funding"
+    }
+    if clean in ambiguous_keywords or (len(tokens) == 1 and clean in ambiguous_keywords):
+        return IntentType.AMBIGUOUS_INCOMPLETE, {
+            "ambiguous_term": clean,
+            "entities": entities
+        }
+
+    if len(tokens) <= 2 and not any(t in ["find", "search", "check", "how", "what", "when", "can", "am", "which", "compare", "need", "show"] for t in tokens):
+        if "academic" in clean:
+            return IntentType.AMBIGUOUS_INCOMPLETE, {"ambiguous_term": "academic", "entities": entities}
+
+    tracking_patterns = [
+        r'\bwhat applications am i (currently )?tracking\b',
+        r'\bmy (tracked )?applications\b',
+        r'\bwhich (application )?deadline is approaching\b',
+        r'\bwhich deadline is approaching (in my|for my)\b',
+        r'\bdeadline.*(in my|planner|tracker)\b',
+        r'\bwhat tasks have i not completed\b',
+        r'\bwhat should i work on next\b',
+        r'\b(incomplete|pending|unfinished) tasks\b',
+        r'\bmy application progress\b',
+        r'\bshow my tracker\b',
+        r'\bview my saved applications\b',
+        r'\bapplications i am tracking\b'
+    ]
+    for pattern in tracking_patterns:
+        if re.search(pattern, clean):
+            return IntentType.TRACKING_PROGRESS, {"entities": entities}
+
+    comparison_patterns = [
+        r'\bwhich one is best\b',
+        r'\bwhich (one )?is best for me\b',
+        r'\bwhich one\b',
+        r'\bwhich (closes|deadline|has the earliest|is first|is earliest)\b',
+        r'\bearliest deadline\b',
+        r'\bcompare\b',
+        r'\bwhich of (these|them)\b'
+    ]
+    for pattern in comparison_patterns:
+        if re.search(pattern, clean):
+            return IntentType.OPPORTUNITY_COMPARISON, {
+                "comparison_type": "earliest_deadline" if "earliest" in clean or "first" in clean or "close" in clean else "best_fit",
+                "entities": entities
+            }
+
+    job_patterns = [
+        r'\bwhat jobs can i apply for\b',
+        r'\bjobs can i apply\b',
+        r'\bgraduate trainee\b',
+        r'\bgraduate trainee programme\b',
+        r'\bgraduate programme\b',
+        r'\bjobs for fresh graduates\b',
+        r'\bentry level jobs\b'
+    ]
+    for pattern in job_patterns:
+        if re.search(pattern, clean):
+            return IntentType.GRADUATE_PROGRAMME_SEARCH, {"entities": entities}
+
+    checklist_patterns = [
+        r'\bhelp me apply\b',
+        r'\bchecklist\b',
+        r'\brequired documents\b',
+        r'\bwhat documents\b',
+        r'\bdocuments do i need\b',
+        r'\bdocuments required\b',
+        r'\bhow to apply\b',
+        r'\bapplication steps\b',
+        r'\bapplication checklist\b'
+    ]
+    for pattern in checklist_patterns:
+        if re.search(pattern, clean):
+            return IntentType.CHECKLIST_GENERATION, {"entities": entities}
+
+    requirement_patterns = [
+        r'\bwhat are the requirements\b',
+        r'\bwhat are the published requirements\b',
+        r'\brequirements of (this|the|safaricom|hef|kra|chevening|equity)\b',
+        r'\bwhat is required\b',
+        r'\bwhat do i need to qualify\b',
+        r'\bqualification requirements\b',
+        r'\bwhat are the qualifications\b'
+    ]
+    for pattern in requirement_patterns:
+        if re.search(pattern, clean):
+            return IntentType.EXPLAIN_REQUIREMENTS, {"entities": entities}
+
+    eligibility_patterns = [
+        r'\b(eligible|eligibility|qualify|qualification|can i apply|am i eligible|am i qualified)\b',
+        r'\bcheck my (eligibility|chances|qualifications)\b',
+        r'\bdo i meet\b'
+    ]
+    for pattern in eligibility_patterns:
+        if re.search(pattern, clean):
+            if has_disc_action and not entities.get("opportunity_id"):
+                if re.search(r'\b(scholarship|scholarships|bursary|bursaries)\b', clean):
+                    return IntentType.SCHOLARSHIP_SEARCH, {"entities": entities}
+                if re.search(r'\b(attachment|internship|internships|practicum)\b', clean):
+                    return IntentType.INTERNSHIP_SEARCH, {"entities": entities}
+                if re.search(r'\b(fellowship|fellowships)\b', clean):
+                    return IntentType.FELLOWSHIP_SEARCH, {"entities": entities}
+                if re.search(r'\b(graduate trainee|graduate programme)\b', clean):
+                    return IntentType.GRADUATE_PROGRAMME_SEARCH, {"entities": entities}
+                return IntentType.OPPORTUNITY_DISCOVERY, {"entities": entities}
+            return IntentType.ELIGIBILITY_ASSESSMENT, {"entities": entities}
+
+    deadline_patterns = [
+        r'\bdeadline\b',
+        r'\bclosing date\b',
+        r'\bwhen does it close\b',
+        r'\bwhen is the deadline\b',
+        r'\bwhat is the deadline\b',
+        r'\bhow many days (left|remaining)\b',
+        r'\bis it still open\b'
+    ]
+    for pattern in deadline_patterns:
+        if re.search(pattern, clean):
+            return IntentType.DEADLINE_INQUIRY, {"entities": entities}
+
+    followup_patterns = [
+        r'\bwhat about\s+([a-zA-Z\s]+)\b',
+        r'\btell me about\s+([a-zA-Z\s]+)\b',
+        r'\bhow about\s+([a-zA-Z\s]+)\b',
+        r'\btell me (more|about that|about the first|about the second|about it)\b',
+        r'\bwhat about (that|the other|the first|the second|it)\b',
+        r'\bcan you explain that\b'
+    ]
+    for pattern in followup_patterns:
+        if re.search(pattern, clean):
+            return IntentType.FOLLOW_UP_QUESTION, {"entities": entities}
+
+    if entities.get("field_of_study") and any(w in clean for w in ["anything for", "for students", "opportunities for", "for computer science", "for engineering"]):
+        return IntentType.FIELD_SEARCH, {"entities": entities}
+
+    pref_patterns = [
+        r'\bi am in (my )?(1st|2nd|3rd|4th|first|second|third|fourth) year\b',
+        r'\bi study\b',
+        r'\bmy gpa is\b',
+        r'\bmy grade is\b',
+        r'\bi attend\b'
+    ]
+    for pattern in pref_patterns:
+        if re.search(pattern, clean):
+            return IntentType.PREFERENCE_UPDATE, {"entities": entities}
+
+    if re.search(r'\b(attachment|internship|internships|industrial attachment|practicum)\b', clean):
+        return IntentType.INTERNSHIP_SEARCH, {"entities": entities}
+
+    if re.search(r'\b(scholarship|scholarships|bursary|bursaries|tuition grant|financial aid|hef|helb)\b', clean):
+        return IntentType.SCHOLARSHIP_SEARCH, {"entities": entities}
+
+    if re.search(r'\b(fellowship|fellowships|research grant|competition|hult prize|mawazo)\b', clean):
+        return IntentType.FELLOWSHIP_SEARCH, {"entities": entities}
+
+    planning_patterns = [
+        r'\bhow should i prepare\b',
+        r'\bapplication plan\b',
+        r'\bprepare my application\b',
+        r'\btimeline to apply\b'
+    ]
+    for pattern in planning_patterns:
+        if re.search(pattern, clean):
+            return IntentType.APPLICATION_PLANNING, {"entities": entities}
+
+    guidance_patterns = [
+        r'\bwhat is (an )?attachment\b',
+        r'\bhow does (hef|helb|kuccps) work\b',
+        r'\bdifference between\b',
+        r'\bcareer advice\b'
+    ]
+    for pattern in guidance_patterns:
+        if re.search(pattern, clean):
+            return IntentType.GENERAL_GUIDANCE, {"entities": entities}
+
+    return IntentType.OPPORTUNITY_DISCOVERY, {"entities": entities}
