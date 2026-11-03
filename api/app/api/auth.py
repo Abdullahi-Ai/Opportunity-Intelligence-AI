@@ -17,6 +17,18 @@ from app.core.rate_limit import limiter_auth
 
 router = APIRouter(prefix="/api/v1/auth", tags=["Authentication & Access Control"])
 
+def normalize_specialisations(specs: Optional[Union[List[str], str]]) -> Optional[str]:
+    """Normalize specialisations to a comma-separated string for database persistence."""
+    if specs is None:
+        return None
+    if isinstance(specs, list):
+        filtered = [s.strip() for s in specs if isinstance(s, str) and s.strip()]
+        return ", ".join(filtered) if filtered else None
+    if isinstance(specs, str):
+        cleaned = specs.strip()
+        return cleaned if cleaned else None
+    return str(specs).strip() or None
+
 class UserRegisterRequest(BaseModel):
     email: str = Field(..., description="Valid user email address")
     password: str = Field(..., min_length=6, description="User password (minimum 6 characters)")
@@ -100,12 +112,24 @@ def register(payload: UserRegisterRequest, db: Session = Depends(get_db)):
         if existing_profile:
             existing_profile.user_id = new_user.id
             existing_profile.full_name = new_user.full_name
+            if payload.degree_title:
+                existing_profile.degree_title = payload.degree_title
+            if payload.specialisations is not None:
+                existing_profile.specialisations = normalize_specialisations(payload.specialisations)
+            if payload.expected_graduation:
+                existing_profile.expected_graduation = payload.expected_graduation
+            if payload.country:
+                existing_profile.country = payload.country
             db.flush()
             profile_brief = StudentProfileBrief(
                 id=existing_profile.id,
                 university=existing_profile.university,
                 field_of_study=existing_profile.field_of_study,
                 degree_level=existing_profile.degree_level,
+                degree_title=existing_profile.degree_title,
+                specialisations=existing_profile.specialisations,
+                expected_graduation=existing_profile.expected_graduation,
+                country=existing_profile.country,
                 graduation_year=existing_profile.graduation_year
             )
         else:
@@ -116,6 +140,10 @@ def register(payload: UserRegisterRequest, db: Session = Depends(get_db)):
                 university=payload.university or "University in Kenya",
                 field_of_study=payload.field_of_study or "General Studies",
                 degree_level=payload.degree_level or "Undergraduate",
+                degree_title=payload.degree_title,
+                specialisations=normalize_specialisations(payload.specialisations),
+                expected_graduation=payload.expected_graduation,
+                country=payload.country or "Kenya",
                 year_of_study=payload.year_of_study or 1,
                 graduation_year=payload.graduation_year or 2026
             )
@@ -126,6 +154,10 @@ def register(payload: UserRegisterRequest, db: Session = Depends(get_db)):
                 university=profile.university,
                 field_of_study=profile.field_of_study,
                 degree_level=profile.degree_level,
+                degree_title=profile.degree_title,
+                specialisations=profile.specialisations,
+                expected_graduation=profile.expected_graduation,
+                country=profile.country,
                 graduation_year=profile.graduation_year
             )
     
@@ -203,6 +235,10 @@ def get_me(current_user: User = Depends(get_current_user)):
             university=p.university,
             field_of_study=p.field_of_study,
             degree_level=p.degree_level,
+            degree_title=p.degree_title,
+            specialisations=p.specialisations,
+            expected_graduation=p.expected_graduation,
+            country=p.country,
             graduation_year=p.graduation_year
         )
     

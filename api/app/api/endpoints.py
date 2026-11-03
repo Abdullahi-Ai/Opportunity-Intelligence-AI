@@ -99,6 +99,18 @@ class OpportunitySummaryResponse(BaseModel):
 class OpportunityDetailResponse(OpportunitySummaryResponse):
     source_notes: Optional[str] = None
 
+def normalize_specialisations(specs: Optional[Union[List[str], str]]) -> Optional[str]:
+    """Normalize specialisations to a comma-separated string for database persistence."""
+    if specs is None:
+        return None
+    if isinstance(specs, list):
+        filtered = [s.strip() for s in specs if isinstance(s, str) and s.strip()]
+        return ", ".join(filtered) if filtered else None
+    if isinstance(specs, str):
+        cleaned = specs.strip()
+        return cleaned if cleaned else None
+    return str(specs).strip() or None
+
 class StudentProfileCreate(BaseModel):
     email: str = Field(..., description="Student email address")
     full_name: str
@@ -420,6 +432,10 @@ def create_or_update_profile(
             detail="Access denied: You can only create or update your own student profile."
         )
 
+    data = payload.model_dump()
+    if "specialisations" in data and data["specialisations"] is not None:
+        data["specialisations"] = normalize_specialisations(data["specialisations"])
+
     student = db.query(StudentProfile).filter(StudentProfile.email == clean_email).first()
     if student:
         if student.user_id and student.user_id != current_user.id and current_user.role != "admin":
@@ -427,12 +443,11 @@ def create_or_update_profile(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied: This student profile is owned by another user."
             )
-        for key, val in payload.model_dump().items():
+        for key, val in data.items():
             setattr(student, key, val)
         if not student.user_id:
             student.user_id = current_user.id
     else:
-        data = payload.model_dump()
         student = StudentProfile(**data, user_id=current_user.id)
         db.add(student)
     db.commit()
