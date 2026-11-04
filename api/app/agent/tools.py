@@ -15,6 +15,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.rag import get_vector_store
+from app.services.matching_engine import (
+    evaluate_degree_level,
+    evaluate_field_of_study,
+    evaluate_academic_year_and_standing
+)
 
 logger = logging.getLogger(__name__)
 
@@ -414,60 +419,48 @@ def tool_assess_eligibility(input_data: AssessEligibilityInput, db: Optional[Ses
         }
 
     meta = matching_chunk["metadata"]
-    allowed_degrees = [d.strip().lower() for d in meta.get("degree_levels", "").split(",") if d.strip()]
-    allowed_fields = [f.strip().lower() for f in meta.get("fields_of_study", "").split(",") if f.strip()]
+    allowed_degrees = meta.get("degree_levels", "")
+    allowed_fields = meta.get("fields_of_study", "")
 
     evaluations = []
 
-    student_deg = input_data.student_degree_level.lower()
-    if not allowed_degrees or any(deg in student_deg or student_deg in deg for deg in allowed_degrees):
-        evaluations.append({
-            "criterion": "Degree Level",
-            "required": meta.get("degree_levels"),
-            "provided": input_data.student_degree_level,
-            "status": "Meets"
-        })
-    else:
-        evaluations.append({
-            "criterion": "Degree Level",
-            "required": meta.get("degree_levels"),
-            "provided": input_data.student_degree_level,
-            "status": "Does Not Meet"
-        })
+    # 1. Authoritative degree level evaluation
+    deg_meets, deg_status, deg_reason = evaluate_degree_level(
+        input_data.student_degree_level,
+        allowed_degrees
+    )
+    evaluations.append({
+        "criterion": "Degree Level",
+        "required": meta.get("degree_levels"),
+        "provided": input_data.student_degree_level,
+        "status": deg_status
+    })
 
-    student_field = input_data.student_field_of_study.lower()
-    has_universal_field = any(any(kw in f for kw in ["all fields", "all disciplines", "all academic disciplines", "any discipline", "open to all"]) for f in allowed_fields)
-    is_universal_student = any(kw in student_field for kw in ["all fields", "all disciplines", "all academic disciplines", "general"])
-    if not allowed_fields or has_universal_field or is_universal_student or any(f in student_field or student_field in f for f in allowed_fields):
-        evaluations.append({
-            "criterion": "Field of Study",
-            "required": meta.get("fields_of_study"),
-            "provided": input_data.student_field_of_study,
-            "status": "Meets"
-        })
-    else:
-        evaluations.append({
-            "criterion": "Field of Study",
-            "required": meta.get("fields_of_study"),
-            "provided": input_data.student_field_of_study,
-            "status": "Needs Verification"
-        })
+    # 2. Authoritative field of study evaluation
+    field_meets, field_status, field_reason = evaluate_field_of_study(
+        input_data.student_field_of_study,
+        None,
+        allowed_fields
+    )
+    evaluations.append({
+        "criterion": "Field of Study",
+        "required": meta.get("fields_of_study"),
+        "provided": input_data.student_field_of_study,
+        "status": field_status
+    })
 
-    if "attachment" in input_data.opportunity_id:
-        if input_data.student_year_of_study in [2, 3, 4]:
-            evaluations.append({
-                "criterion": "Year of Study (Attachment)",
-                "required": "2nd, 3rd, or 4th year continuing student",
-                "provided": f"Year {input_data.student_year_of_study}",
-                "status": "Meets"
-            })
-        else:
-            evaluations.append({
-                "criterion": "Year of Study (Attachment)",
-                "required": "2nd, 3rd, or 4th year continuing student",
-                "provided": f"Year {input_data.student_year_of_study}",
-                "status": "Does Not Meet"
-            })
+    # 3. Academic year & student standing evaluation
+    yr_meets, yr_status, yr_reason, yr_crit = evaluate_academic_year_and_standing(
+        input_data.student_year_of_study,
+        meta.get("title", ""),
+        input_data.opportunity_id,
+        target_audience=meta.get("target_audience"),
+        category=meta.get("category"),
+        degree_levels=allowed_degrees,
+        source_notes=matching_chunk.get("content")
+    )
+    if yr_crit is not None:
+        evaluations.append(yr_crit)
 
     statuses = [e["status"] for e in evaluations]
     if "Does Not Meet" in statuses:

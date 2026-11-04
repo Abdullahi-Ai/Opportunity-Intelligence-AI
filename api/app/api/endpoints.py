@@ -27,6 +27,15 @@ from app.agent.tools import (
     tool_generate_application_checklist,
     GenerateChecklistInput
 )
+from app.services.matching_engine import (
+    evaluate_degree_level,
+    evaluate_field_of_study,
+    evaluate_academic_year_and_standing,
+    calculate_match_score,
+    get_match_sort_key,
+    UNIVERSAL_FIELD_KEYWORDS,
+    clean_text
+)
 
 is_production_env = settings.APP_ENV.lower() in ["production", "prod", "staging"]
 is_serverless_env = bool(os.environ.get("VERCEL"))
@@ -207,12 +216,14 @@ def calculate_personalized_matches(student: StudentProfile, db: Session) -> Pers
     tracked = db.query(TrackedApplication).filter(TrackedApplication.student_id == student.id).all()
     saved_ids = {app.opportunity_id for app in tracked}
 
-    student_deg = (student.degree_level or "Undergraduate").strip().lower()
-    student_field = (student.field_of_study or "").strip().lower()
+    student_deg = (student.degree_level or "Undergraduate").strip()
+    student_field = (student.field_of_study or "").strip()
     student_yr = student.year_of_study or 1
+    student_specs = getattr(student, "specialisations", None)
     student_prefs = [p.strip().lower() for p in (student.preferred_categories or "").split(",") if p.strip()]
 
     matches = []
+    opp_dict = {opp.id: opp for opp in opps}
 
     for opp in opps:
         ver_status = opp.verification_status if getattr(opp, "verification_status", None) else ("VERIFIED" if opp.is_verified else "UNVERIFIED")
@@ -230,30 +241,26 @@ def calculate_personalized_matches(student: StudentProfile, db: Session) -> Pers
         dl_label = cd.get("status_label") or opp.status
         is_open = cd.get("is_open", False)
 
-        allowed_degs = [d.strip().lower() for d in (opp.degree_levels or "").split(",") if d.strip()]
-        allowed_fields = [f.strip().lower() for f in (opp.fields_of_study or "").split(",") if f.strip()]
-
         breakdown = []
-        deg_meets = not allowed_degs or any(student_deg in d or d in student_deg for d in allowed_degs)
+
+        # 1. Authoritative degree level evaluation
+        deg_meets, deg_status, deg_reason = evaluate_degree_level(
+            student_deg,
+            opp.degree_levels
+        )
         breakdown.append({
             "criterion": "Degree Level",
             "required": opp.degree_levels or "All Degree Levels",
             "provided": student.degree_level,
-            "status": "Meets" if deg_meets else "Does Not Meet"
+            "status": deg_status
         })
 
-        if not allowed_fields or "all fields" in allowed_fields:
-            field_meets = True
-            field_status = "Meets"
-        elif any(student_field in f or f in student_field for f in allowed_fields):
-            field_meets = True
-            field_status = "Meets"
-        elif any(w in student_field for f in allowed_fields for w in f.split()):
-            field_meets = False
-            field_status = "Needs Verification"
-        else:
-            field_meets = False
-            field_status = "Does Not Meet"
+        # 2. Authoritative field of study evaluation
+        field_meets, field_status, field_reason = evaluate_field_of_study(
+            student_field,
+            student_specs,
+            opp.fields_of_study
+        )
         breakdown.append({
             "criterion": "Field of Study",
             "required": opp.fields_of_study or "All Fields",
@@ -261,47 +268,61 @@ def calculate_personalized_matches(student: StudentProfile, db: Session) -> Pers
             "status": field_status
         })
 
-        yr_meets = True
-        if "attachment" in opp.id.lower() or "attachment" in opp.title.lower():
-            if student_yr in [2, 3, 4]:
-                yr_status = "Meets"
-            else:
-                yr_status = "Does Not Meet"
-                yr_meets = False
+        # 3. Academic year & student standing evaluation
+        yr_meets, yr_status, yr_reason, yr_crit = evaluate_academic_year_and_standing(
+            student_yr,
+            opp.title,
+            opp.id,
+            target_audience=opp.target_audience,
+            category=opp.category,
+            degree_levels=opp.degree_levels,
+            source_notes=opp.source_notes
+        )
+        if yr_crit is not None:
+            criterion_label = "Continuing Student Year (Attachment)" if yr_crit["criterion"] == "Year of Study (Attachment)" else yr_crit["criterion"]
             breakdown.append({
-                "criterion": "Continuing Student Year (Attachment)",
-                "required": "2nd, 3rd, or 4th Year continuing student",
-                "provided": f"Year {student_yr}",
-                "status": yr_status
+                "criterion": criterion_label,
+                "required": yr_crit["required"],
+                "provided": yr_crit["provided"],
+                "status": yr_crit["status"]
             })
 
+        # 4. Overall eligibility status classification
         statuses = [b["status"] for b in breakdown]
         if "Does Not Meet" in statuses:
             eligibility_status = "Does not meet requirements"
-            base_score = 15 if (deg_meets or field_meets) else 0
         elif "Needs Verification" in statuses:
             eligibility_status = "Needs verification"
-            base_score = 45
         else:
             eligibility_status = "Meets requirements"
-            base_score = 60
 
-        field_bonus = 20 if field_status == "Meets" else (10 if "all fields" in allowed_fields or not allowed_fields else 0)
-        deg_bonus = 10 if deg_meets else 0
-        pref_bonus = 5 if (not student_prefs or opp.category.lower() in student_prefs) else 0
-        deadline_bonus = 5 if is_open else 0
+        # 5. Deterministic scoring
+        cleaned_fields = clean_text(opp.fields_of_study)
+        is_universal_field = not opp.fields_of_study or any(kw in cleaned_fields for kw in UNIVERSAL_FIELD_KEYWORDS)
+        pref_meets = not student_prefs or opp.category.lower() in student_prefs
 
-        score = min(100, max(0, base_score + field_bonus + deg_bonus + pref_bonus + deadline_bonus))
+        score = calculate_match_score(
+            eligibility_status=eligibility_status,
+            deg_meets=deg_meets,
+            field_status=field_status,
+            pref_meets=pref_meets,
+            is_open=is_open,
+            is_universal_field=is_universal_field
+        )
 
+        # 6. Explainable match explanation
         reasons = []
         if deg_meets:
             reasons.append(f"Eligible for {student.degree_level} students")
         if field_status == "Meets":
-            reasons.append(f"Matches your course in {student.field_of_study}")
+            if is_universal_field:
+                reasons.append("Open to all academic disciplines")
+            else:
+                reasons.append(f"Matches your course in {student.field_of_study}")
         elif field_status == "Needs Verification":
             reasons.append(f"Related to {student.field_of_study} (requires verification)")
-        if "attachment" in opp.id.lower() and yr_meets:
-            reasons.append(f"Year {student_yr} qualifies for continuing industrial attachment")
+        if yr_crit and yr_meets:
+            reasons.append(yr_reason)
         if dl_label:
             reasons.append(f"Deadline: {dl_label}")
 
@@ -325,7 +346,21 @@ def calculate_personalized_matches(student: StudentProfile, db: Session) -> Pers
             criteria_breakdown=breakdown
         ))
 
-    matches.sort(key=lambda m: (m.eligibility_status == "Meets requirements", m.match_score), reverse=True)
+    # Deterministic 4-tier sorting:
+    # 1. Eligibility Status: Meets (1) > Needs Verification (2) > Does Not Meet (3)
+    # 2. Match Score: Descending
+    # 3. Deadline Urgency: Soonest first
+    # 4. Creation Date: Descending
+    # 5. Opportunity ID: Ascending stable tie-breaker
+    matches.sort(
+        key=lambda m: get_match_sort_key(
+            eligibility_status=m.eligibility_status,
+            match_score=m.match_score,
+            days_remaining=m.days_remaining,
+            created_at=getattr(opp_dict.get(m.opportunity_id), "created_at", None),
+            opportunity_id=m.opportunity_id
+        )
+    )
 
     return PersonalizedMatchesResponse(
         student_id=student.id,
