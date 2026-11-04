@@ -24,7 +24,8 @@ export default function PersonalizedMatches({
   onSelectOpportunity,
   onCheckEligibility,
   onSaveToTracker,
-  trackedIds,
+  trackedIds = new Set(),
+  savingIds = new Set(),
   onOpenProfile,
   onOpenAuth
 }) {
@@ -234,14 +235,16 @@ export default function PersonalizedMatches({
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-          {filteredMatches.map((item) => {
-            const isSaved = trackedIds.has(item.opportunity_id) || item.is_saved;
+          {filteredMatches.map((item, index) => {
+            const oppId = item.opportunity_id || item.id;
+            const isSaved = (trackedIds?.has && oppId ? trackedIds.has(oppId) : false) || Boolean(item.is_saved);
+            const isSaving = Boolean(savingIds?.has && oppId && savingIds.has(oppId));
             const isMeets = item.eligibility_status === 'Meets requirements';
             const isVerification = item.eligibility_status === 'Needs verification';
 
             return (
               <div
-                key={item.opportunity_id}
+                key={oppId || `match-${index}`}
                 className="bg-white rounded-3xl border border-slate-200/80 shadow-2xs hover:shadow-md hover:border-brand-200 transition-all flex flex-col justify-between overflow-hidden"
               >
                 <div className="p-6 space-y-4">
@@ -265,7 +268,7 @@ export default function PersonalizedMatches({
 
                   <div>
                     <h3
-                      onClick={() => onSelectOpportunity({ id: item.opportunity_id, ...item })}
+                      onClick={() => onSelectOpportunity && onSelectOpportunity({ id: oppId, ...item })}
                       className="font-black text-slate-900 text-base leading-snug hover:text-brand-600 transition-colors cursor-pointer line-clamp-2"
                     >
                       {item.title}
@@ -312,7 +315,7 @@ export default function PersonalizedMatches({
 
                 <div className="px-6 py-4 bg-slate-50/50 border-t border-slate-100 flex items-center justify-between gap-3">
                   <button
-                    onClick={() => onCheckEligibility({ id: item.opportunity_id, ...item })}
+                    onClick={() => onCheckEligibility && onCheckEligibility({ id: oppId, ...item })}
                     className="text-xs font-semibold text-brand-700 hover:text-brand-800 hover:underline flex items-center space-x-1"
                   >
                     <span>Inspect Criteria Breakdown</span>
@@ -332,17 +335,25 @@ export default function PersonalizedMatches({
                       </a>
                     )}
                     <button
-                      onClick={() => onSaveToTracker(item.opportunity_id)}
+                      disabled={isSaved || isSaving}
+                      onClick={() => !isSaved && !isSaving && onSaveToTracker && onSaveToTracker({ id: oppId, ...item })}
                       className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 shadow-2xs ${
                         isSaved
-                          ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                          : 'bg-brand-600 hover:bg-brand-700 text-white'
+                          ? 'bg-emerald-50 text-emerald-800 border border-emerald-200 cursor-default'
+                          : isSaving
+                          ? 'bg-brand-400 text-white cursor-wait opacity-85'
+                          : 'bg-brand-600 hover:bg-brand-700 text-white cursor-pointer'
                       }`}
                     >
                       {isSaved ? (
                         <>
                           <BookmarkCheck className="w-3.5 h-3.5 text-emerald-600" />
                           <span>Saved in Planner</span>
+                        </>
+                      ) : isSaving ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Saving...</span>
                         </>
                       ) : (
                         <>

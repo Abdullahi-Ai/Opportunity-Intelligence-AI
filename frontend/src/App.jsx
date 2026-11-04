@@ -28,6 +28,7 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [student, setStudent] = useState(null);
   const [trackedIds, setTrackedIds] = useState(new Set());
+  const [savingIds, setSavingIds] = useState(new Set());
 
   const [selectedOpportunity, setSelectedOpportunity] = useState(null);
   const [eligibilityOpportunity, setEligibilityOpportunity] = useState(null);
@@ -132,12 +133,44 @@ export default function App() {
       return;
     }
 
+    if (!student?.id) {
+      alert('Please complete your student profile before saving opportunities to your personal application tracker.');
+      setIsProfileOpen(true);
+      return;
+    }
+
+    const oppId = typeof opp === 'object' ? (opp.id || opp.opportunity_id) : opp;
+    const oppTitle = typeof opp === 'object' ? (opp.title || 'Opportunity') : 'Opportunity';
+
+    if (!oppId) {
+      alert('Error: Missing opportunity identifier. Cannot save to tracker.');
+      return;
+    }
+
+    if (trackedIds && trackedIds.has(oppId)) {
+      alert(`"${oppTitle}" is already in your Application Tracker.`);
+      return;
+    }
+
+    if (savingIds && savingIds.has(oppId)) {
+      return;
+    }
+
+    setSavingIds((prev) => new Set([...prev, oppId]));
+
     try {
-      await api.saveToTracker(student.id, opp.id, 'Saved', 'Saved via Opportunity Discovery Explorer');
-      setTrackedIds((prev) => new Set([...prev, opp.id]));
-      alert(`Success! "${opp.title}" has been saved to your Application Tracker and a preparation checklist has been created.`);
+      await api.saveToTracker(student.id, oppId, 'Saved', 'Saved via Opportunity Discovery Explorer');
+      setTrackedIds((prev) => new Set([...prev, oppId]));
+      alert(`Success! "${oppTitle}" has been saved to your Application Tracker and a preparation checklist has been created.`);
     } catch (err) {
-      alert('Failed to save opportunity to tracker: ' + err.message);
+      const errorMsg = err?.response?.data?.detail || err?.message || 'Unknown network error';
+      alert('Failed to save opportunity to tracker: ' + errorMsg);
+    } finally {
+      setSavingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(oppId);
+        return next;
+      });
     }
   };
 
@@ -188,6 +221,9 @@ export default function App() {
               onOpenProfile={() => (user ? setIsProfileOpen(true) : setIsAuthOpen(true))}
               onSelectOpportunity={(opp) => setSelectedOpportunity(opp)}
               onCheckEligibility={(opp) => setEligibilityOpportunity(opp)}
+              onSaveToTracker={handleSaveToTracker}
+              trackedIds={trackedIds}
+              savingIds={savingIds}
             />
           )}
 
