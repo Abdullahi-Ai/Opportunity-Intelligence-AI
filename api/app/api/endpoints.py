@@ -90,6 +90,7 @@ class OpportunitySummaryResponse(BaseModel):
     official_url: str
     application_deadline: Optional[str] = None
     is_verified: bool
+    verification_status: str = "UNVERIFIED"
     verification_date: Optional[str] = None
     status: str
     days_remaining: Optional[int] = None
@@ -181,7 +182,8 @@ class PersonalizedMatchItem(BaseModel):
     deadline: Optional[str] = None
     days_remaining: Optional[int] = None
     deadline_status_label: Optional[str] = None
-    is_verified: bool = True
+    is_verified: bool = False
+    verification_status: str = "UNVERIFIED"
     eligibility_status: str
     match_score: int
     match_explanation: str
@@ -213,8 +215,16 @@ def calculate_personalized_matches(student: StudentProfile, db: Session) -> Pers
     matches = []
 
     for opp in opps:
+        ver_status = opp.verification_status if getattr(opp, "verification_status", None) else ("VERIFIED" if opp.is_verified else "UNVERIFIED")
+        is_genuinely_verified = (ver_status == "VERIFIED")
+
         cd = tool_calculate_deadline_countdown(
-            DeadlineCountdownInput(deadline_date_str=opp.application_deadline)
+            DeadlineCountdownInput(
+                deadline_date_str=opp.application_deadline,
+                is_officially_verified=is_genuinely_verified,
+                verification_source=opp.provider,
+                verification_date=opp.verification_date
+            )
         )
         days_rem = cd.get("days_remaining")
         dl_label = cd.get("status_label") or opp.status
@@ -306,7 +316,8 @@ def calculate_personalized_matches(student: StudentProfile, db: Session) -> Pers
             deadline=opp.application_deadline,
             days_remaining=days_rem,
             deadline_status_label=dl_label,
-            is_verified=opp.is_verified,
+            is_verified=is_genuinely_verified,
+            verification_status=ver_status,
             eligibility_status=eligibility_status,
             match_score=score,
             match_explanation=explanation,
@@ -357,8 +368,16 @@ def list_opportunities(
     results = []
 
     for opp in opportunities:
+        ver_status = opp.verification_status if getattr(opp, "verification_status", None) else ("VERIFIED" if opp.is_verified else "UNVERIFIED")
+        is_genuinely_verified = (ver_status == "VERIFIED")
+
         cd_res = tool_calculate_deadline_countdown(
-            DeadlineCountdownInput(deadline_date_str=opp.application_deadline)
+            DeadlineCountdownInput(
+                deadline_date_str=opp.application_deadline,
+                is_officially_verified=is_genuinely_verified,
+                verification_source=opp.provider,
+                verification_date=opp.verification_date
+            )
         )
         days_rem = cd_res.get("days_remaining")
         label = cd_res.get("status_label") or opp.status
@@ -376,7 +395,8 @@ def list_opportunities(
             "degree_levels": opp.degree_levels,
             "official_url": opp.official_url,
             "application_deadline": opp.application_deadline,
-            "is_verified": opp.is_verified,
+            "is_verified": is_genuinely_verified,
+            "verification_status": ver_status,
             "verification_date": opp.verification_date,
             "status": opp.status,
             "days_remaining": days_rem,
@@ -393,8 +413,16 @@ def get_opportunity_details(opportunity_id: str, db: Session = Depends(get_db)):
     if not opp:
         raise HTTPException(status_code=404, detail=f"Opportunity '{opportunity_id}' not found.")
 
+    ver_status = opp.verification_status if getattr(opp, "verification_status", None) else ("VERIFIED" if opp.is_verified else "UNVERIFIED")
+    is_genuinely_verified = (ver_status == "VERIFIED")
+
     cd_res = tool_calculate_deadline_countdown(
-        DeadlineCountdownInput(deadline_date_str=opp.application_deadline)
+        DeadlineCountdownInput(
+            deadline_date_str=opp.application_deadline,
+            is_officially_verified=is_genuinely_verified,
+            verification_source=opp.provider,
+            verification_date=opp.verification_date
+        )
     )
     days_rem = cd_res.get("days_remaining")
     label = cd_res.get("status_label") or opp.status
@@ -409,7 +437,8 @@ def get_opportunity_details(opportunity_id: str, db: Session = Depends(get_db)):
         degree_levels=opp.degree_levels,
         official_url=opp.official_url,
         application_deadline=opp.application_deadline,
-        is_verified=opp.is_verified,
+        is_verified=is_genuinely_verified,
+        verification_status=ver_status,
         verification_date=opp.verification_date,
         source_notes=opp.source_notes,
         status=opp.status,

@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, ShieldCheck, ExternalLink, Calendar, Bookmark, BookmarkCheck, CheckSquare, Sparkles } from 'lucide-react';
+import { X, ShieldCheck, ExternalLink, Calendar, Bookmark, BookmarkCheck, CheckSquare, Sparkles, AlertCircle, Clock } from 'lucide-react';
 
 export default function OpportunityModal({ opportunity, onClose, onCheckEligibility, onSave, isTracked }) {
   if (!opportunity) return null;
@@ -14,10 +14,24 @@ export default function OpportunityModal({ opportunity, onClose, onCheckEligibil
               <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-brand-100 text-brand-800">
                 {opportunity.category}
               </span>
-              {opportunity.is_verified && (
+              {(opportunity.verification_status === 'VERIFIED' || (opportunity.is_verified && !opportunity.verification_status)) ? (
                 <span className="flex items-center space-x-1 text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
                   <span>Verified Source</span>
+                </span>
+              ) : opportunity.verification_status === 'NEEDS_REVIEW' ? (
+                <span className="flex items-center space-x-1 text-xs font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                  <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Needs Review</span>
+                </span>
+              ) : opportunity.verification_status === 'PENDING_REVIEW' ? (
+                <span className="flex items-center space-x-1 text-xs font-medium px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">
+                  <Clock className="w-3.5 h-3.5 text-sky-600" />
+                  <span>Pending Review</span>
+                </span>
+              ) : (
+                <span className="flex items-center space-x-1 text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                  <span>Unverified</span>
                 </span>
               )}
             </div>

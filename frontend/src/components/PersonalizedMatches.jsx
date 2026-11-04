@@ -257,10 +257,24 @@ export default function PersonalizedMatches({
                       <span className="text-xs font-black px-2 py-0.5 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200/60">
                         {item.match_score}% Match
                       </span>
-                      {item.is_verified && (
+                      {(item.verification_status === 'VERIFIED' || (item.is_verified && !item.verification_status)) ? (
                         <span className="inline-flex items-center space-x-1 text-[10px] font-bold text-emerald-700 px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200">
                           <ShieldCheck className="w-3 h-3" />
                           <span>Verified</span>
+                        </span>
+                      ) : item.verification_status === 'NEEDS_REVIEW' ? (
+                        <span className="inline-flex items-center space-x-1 text-[10px] font-bold text-amber-700 px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200">
+                          <AlertCircle className="w-3 h-3" />
+                          <span>Needs Review</span>
+                        </span>
+                      ) : item.verification_status === 'PENDING_REVIEW' ? (
+                        <span className="inline-flex items-center space-x-1 text-[10px] font-bold text-sky-700 px-2 py-0.5 rounded-full bg-sky-50 border border-sky-200">
+                          <Clock className="w-3 h-3" />
+                          <span>Pending Review</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center space-x-1 text-[10px] font-bold text-slate-600 px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200">
+                          <span>Unverified</span>
                         </span>
                       )}
                     </div>

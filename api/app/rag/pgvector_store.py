@@ -75,7 +75,7 @@ class OpportunityChunkRecord(PgBase):
     official_url = Column(String(500), nullable=False)
     application_deadline = Column(String(100), nullable=True)
     status = Column(String(20), nullable=False, default="Active", index=True)
-    verification_status = Column(String(50), nullable=False, default="Verified")
+    verification_status = Column(String(50), nullable=False, default="UNVERIFIED")
     metadata_json = Column(Text, nullable=False)
     embedding = Column(PGVectorType(384), nullable=True)
 
@@ -182,7 +182,7 @@ class PgVectorStore:
                     existing.official_url = meta.get("official_url", "")
                     existing.application_deadline = meta.get("application_deadline")
                     existing.status = meta.get("status", "Active")
-                    existing.verification_status = meta.get("verification_status", "Verified")
+                    existing.verification_status = meta.get("verification_status", "UNVERIFIED")
                     existing.metadata_json = json.dumps(meta)
                     if emb is not None:
                         existing.embedding = emb
@@ -198,7 +198,7 @@ class PgVectorStore:
                         official_url=meta.get("official_url", ""),
                         application_deadline=meta.get("application_deadline"),
                         status=meta.get("status", "Active"),
-                        verification_status=meta.get("verification_status", "Verified"),
+                        verification_status=meta.get("verification_status", "UNVERIFIED"),
                         metadata_json=json.dumps(meta),
                         embedding=emb
                     )

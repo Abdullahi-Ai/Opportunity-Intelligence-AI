@@ -237,6 +237,10 @@ export const api = {
     });
   },
 
+  adminGetVerificationHistory: (id) => {
+    return request(`/admin/opportunities/${id}/verification-history`);
+  },
+
   adminDeleteOpportunity: (id) => {
     return request(`/admin/opportunities/${id}`, {
       method: 'DELETE',

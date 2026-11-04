@@ -151,4 +151,4 @@ def test_role_based_access_control_on_admin_endpoints():
         headers={"Authorization": f"Bearer {admin_token}"}
     )
     assert delete_resp.status_code == 200
-    assert delete_resp.json()["status"] == "success"
+    assert delete_resp.json()["status"] in ["success", "archived"]

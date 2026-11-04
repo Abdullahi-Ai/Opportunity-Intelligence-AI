@@ -45,7 +45,7 @@ def _search_opportunities_relational_fallback(
 
     try:
         base_query = session.query(Opportunity).filter(
-            Opportunity.is_verified == True,
+            Opportunity.verification_status == "VERIFIED",
             Opportunity.status == "open"
         )
         if category:
@@ -103,7 +103,8 @@ def _search_opportunities_relational_fallback(
                 "deadline": opp.application_deadline,
                 "published_deadline": opp.application_deadline,
                 "official_url": opp.official_url,
-                "verification_status": "verified" if opp.is_verified else "unverified",
+                "verification_status": opp.verification_status or ("VERIFIED" if opp.is_verified else "UNVERIFIED"),
+                "is_verified": bool(opp.is_verified),
                 "degree_levels": opp.degree_levels,
                 "fields_of_study": opp.fields_of_study,
                 "content_excerpt": excerpt,
@@ -132,25 +133,66 @@ def tool_search_opportunities(
             category=input_data.category
         )
         if raw_vector_results:
-            results = [
-                {
-                    "opportunity_id": r["metadata"].get("opportunity_id"),
-                    "title": r["metadata"].get("title"),
-                    "provider": r["metadata"].get("provider"),
-                    "category": r["metadata"].get("category"),
-                    "section": r["metadata"].get("section_title"),
-                    "deadline": r["metadata"].get("application_deadline"),
-                    "published_deadline": r["metadata"].get("application_deadline"),
-                    "official_url": r["metadata"].get("official_url"),
-                    "verification_status": r["metadata"].get("verification_status", "verified"),
-                    "degree_levels": r["metadata"].get("degree_levels"),
-                    "fields_of_study": r["metadata"].get("fields_of_study"),
+            # HIGH-01: Authoritative Relational Verification Status Lookup
+            # Vector metadata must not independently certify opportunities.
+            opp_ids = list({r["metadata"].get("opportunity_id") for r in raw_vector_results if r.get("metadata") and r["metadata"].get("opportunity_id")})
+            rel_map = {}
+            if opp_ids:
+                from app.models.entities import Opportunity
+                from app.db.session import SessionLocal
+                session = SessionLocal()
+                try:
+                    opp_rows = session.query(
+                        Opportunity.id,
+                        Opportunity.verification_status,
+                        Opportunity.is_verified,
+                        Opportunity.status,
+                        Opportunity.official_url
+                    ).filter(Opportunity.id.in_(opp_ids)).all()
+                    for oid, vstat, is_ver, ost, off_url in opp_rows:
+                        rel_map[oid] = {
+                            "verification_status": vstat or ("VERIFIED" if is_ver else "UNVERIFIED"),
+                            "is_verified": bool(is_ver),
+                            "status": ost,
+                            "official_url": off_url
+                        }
+                finally:
+                    session.close()
+
+            results = []
+            for r in raw_vector_results:
+                meta = r.get("metadata", {})
+                oid = meta.get("opportunity_id")
+                rel_info = rel_map.get(oid, {})
+
+                # Exclude archived opportunities from retrieval results
+                if rel_info.get("status") == "archived":
+                    continue
+
+                # Fail-closed: Vector chunk metadata cannot assert verification without authoritative relational backing
+                if not rel_info:
+                    vstatus = "UNVERIFIED"
+                else:
+                    vstatus = str(rel_info.get("verification_status") or "UNVERIFIED").strip().upper()
+                is_ver_bool = (vstatus == "VERIFIED")
+
+                results.append({
+                    "opportunity_id": oid,
+                    "title": meta.get("title"),
+                    "provider": meta.get("provider"),
+                    "category": meta.get("category"),
+                    "section": meta.get("section_title"),
+                    "deadline": meta.get("application_deadline"),
+                    "published_deadline": meta.get("application_deadline"),
+                    "official_url": rel_info.get("official_url") or meta.get("official_url"),
+                    "verification_status": vstatus,
+                    "is_verified": is_ver_bool,
+                    "degree_levels": meta.get("degree_levels"),
+                    "fields_of_study": meta.get("fields_of_study"),
                     "content_excerpt": r.get("content", ""),
                     "similarity_score": r.get("similarity_score", 0.0),
                     "retrieval_mode": "vector_semantic"
-                }
-                for r in raw_vector_results
-            ]
+                })
         else:
             results = []
     except Exception as exc:

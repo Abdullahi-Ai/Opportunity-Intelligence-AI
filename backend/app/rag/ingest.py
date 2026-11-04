@@ -10,7 +10,7 @@ from typing import Dict, Any
 
 from app.config import settings
 from app.db.session import SessionLocal, Base, engine
-from app.models.entities import Opportunity
+from app.models.entities import Opportunity, VerificationStatus
 from app.rag.document_loader import parse_markdown_with_frontmatter, chunk_opportunity_document
 from app.rag.vector_store import vector_store
 
@@ -38,8 +38,10 @@ def sync_relational_opportunities(raw_path: Path) -> int:
                     official_url=doc.official_url,
                     application_deadline=doc.application_deadline,
                     status=doc.status,
-                    is_verified=(doc.verification_status.lower() == "verified"),
-                    verification_date=doc.verified_date,
+                    # Safe defaults: Imported metadata cannot self-certify as VERIFIED
+                    is_verified=False,
+                    verification_status=VerificationStatus.PENDING_REVIEW.value,
+                    verification_date=None,
                     source_notes=doc.source_notes
                 )
                 db.add(opp)
@@ -50,12 +52,25 @@ def sync_relational_opportunities(raw_path: Path) -> int:
                 existing.target_audience = doc.target_audience
                 existing.fields_of_study = ", ".join(doc.field_of_study)
                 existing.degree_levels = ", ".join(doc.degree_level)
-                existing.official_url = doc.official_url
                 existing.application_deadline = doc.application_deadline
                 existing.status = doc.status
-                existing.is_verified = (doc.verification_status.lower() == "verified")
-                existing.verification_date = doc.verified_date
-                existing.source_notes = doc.source_notes
+
+                # CRIT-03: Protect administrator decisions and audited evidence from re-ingestion clobbering.
+                # Decisions in VERIFIED, NEEDS_REVIEW, or REJECTED statuses are authoritative and immutable
+                # to automated re-ingestion, preserving administrator notes and corrected URLs.
+                audited_statuses = {
+                    VerificationStatus.VERIFIED.value,
+                    VerificationStatus.NEEDS_REVIEW.value,
+                    VerificationStatus.REJECTED.value,
+                }
+                curr_status = getattr(existing, "verification_status", None)
+
+                if curr_status not in audited_statuses:
+                    existing.is_verified = False
+                    existing.verification_status = VerificationStatus.PENDING_REVIEW.value
+                    existing.verification_date = None
+                    existing.official_url = doc.official_url
+                    existing.source_notes = doc.source_notes
             count += 1
         db.commit()
     finally:

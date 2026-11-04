@@ -104,7 +104,7 @@ class Settings(BaseSettings):
         if not chroma_path.is_absolute():
             self.CHROMA_PERSIST_DIRECTORY = str((BASE_DIR / chroma_path).resolve())
         
-        if self.DATABASE_URL.startswith("sqlite:///") and not self.DATABASE_URL.startswith("sqlite:////"):
+        if self.DATABASE_URL.startswith("sqlite:///") and not self.DATABASE_URL.startswith("sqlite:////") and ":memory:" not in self.DATABASE_URL:
             rel_part = self.DATABASE_URL.replace("sqlite:///", "")
             if rel_part.startswith("./"):
                 rel_part = rel_part[2:]

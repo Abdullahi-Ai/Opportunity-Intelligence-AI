@@ -25,9 +25,9 @@ export default function TopHeader({
       </form>
 
       <div className="flex items-center space-x-3">
-        <div className="hidden lg:flex items-center space-x-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200/70 text-emerald-800 text-[11px] font-semibold">
-          <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-          <span>Verified Official Sources Only</span>
+        <div className="hidden lg:flex items-center space-x-1.5 px-3 py-1 rounded-full bg-slate-100 border border-slate-200 text-slate-700 text-[11px] font-semibold">
+          <ShieldCheck className="w-3.5 h-3.5 text-brand-600" />
+          <span>Evidence-Based Opportunities Directory</span>
         </div>
 
         {user ? (

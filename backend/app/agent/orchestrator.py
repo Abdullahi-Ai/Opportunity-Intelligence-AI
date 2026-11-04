@@ -457,7 +457,7 @@ class AgentOrchestrator:
                     provider = opp.get("provider", "Official Organization")
                     url = opp.get("official_url", "")
                     raw_deadline = opp.get("deadline") or opp.get("published_deadline")
-                    is_verified = (opp.get("verification_status") == "verified")
+                    is_verified = (str(opp.get("verification_status", "")).strip().upper() == "VERIFIED")
 
                     if url and url not in seen_urls:
                         seen_urls.add(url)

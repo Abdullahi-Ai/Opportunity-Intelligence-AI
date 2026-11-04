@@ -1,5 +1,5 @@
 import React from 'react';
-import { Calendar, ShieldCheck, ExternalLink, CheckCircle, Bookmark, Sparkles, ArrowRight } from 'lucide-react';
+import { Calendar, ShieldCheck, ExternalLink, CheckCircle, Bookmark, Sparkles, ArrowRight, AlertCircle, Clock } from 'lucide-react';
 
 export default function OpportunityCard({ opportunity, onSelect, onCheckEligibility, onSave, isTracked }) {
   const getBadgeStyle = () => {
@@ -36,10 +36,24 @@ export default function OpportunityCard({ opportunity, onSelect, onCheckEligibil
             <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${getCategoryColor(opportunity.category)}`}>
               {opportunity.category}
             </span>
-            {opportunity.is_verified && (
+            {(opportunity.verification_status === 'VERIFIED' || (opportunity.is_verified && !opportunity.verification_status)) ? (
               <span className="flex items-center space-x-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
                 <span>Verified Official</span>
+              </span>
+            ) : opportunity.verification_status === 'NEEDS_REVIEW' ? (
+              <span className="flex items-center space-x-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                <span>Needs Review</span>
+              </span>
+            ) : opportunity.verification_status === 'PENDING_REVIEW' ? (
+              <span className="flex items-center space-x-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">
+                <Clock className="w-3.5 h-3.5 text-sky-600" />
+                <span>Pending Review</span>
+              </span>
+            ) : (
+              <span className="flex items-center space-x-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                <span>Unverified</span>
               </span>
             )}
           </div>

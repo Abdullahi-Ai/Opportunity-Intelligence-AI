@@ -31,11 +31,12 @@ def normalize_database_url(url: str) -> str:
 db_url = normalize_database_url(settings.DATABASE_URL)
 
 if db_url.startswith("sqlite"):
-    engine = create_engine(
-        db_url,
-        connect_args={"check_same_thread": False},
-        echo=False
-    )
+    connect_args = {"check_same_thread": False}
+    kwargs = {"connect_args": connect_args, "echo": False}
+    if ":memory:" in db_url:
+        from sqlalchemy.pool import StaticPool
+        kwargs["poolclass"] = StaticPool
+    engine = create_engine(db_url, **kwargs)
 elif "-pooler." in db_url or os.environ.get("VERCEL"):
     engine = create_engine(
         db_url,

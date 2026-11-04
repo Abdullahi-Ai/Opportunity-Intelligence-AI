@@ -8,6 +8,7 @@ Defines:
 """
 
 import uuid
+from enum import Enum
 from datetime import datetime, date
 from sqlalchemy import (
     Column,
@@ -18,10 +19,18 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Text,
-    UniqueConstraint
+    UniqueConstraint,
+    Index
 )
 from sqlalchemy.orm import relationship
 from app.db.session import Base
+
+class VerificationStatus(str, Enum):
+    UNVERIFIED = "UNVERIFIED"
+    PENDING_REVIEW = "PENDING_REVIEW"
+    VERIFIED = "VERIFIED"
+    NEEDS_REVIEW = "NEEDS_REVIEW"
+    REJECTED = "REJECTED"
 
 class User(Base):
     __tablename__ = "users"
@@ -76,12 +85,43 @@ class Opportunity(Base):
     official_url = Column(Text, nullable=False)
     application_deadline = Column(String(50), nullable=True)
     status = Column(String(50), default="open")
-    is_verified = Column(Boolean, default=True)
+    is_verified = Column(Boolean, default=False, nullable=False)
+    verification_status = Column(String(30), default=VerificationStatus.UNVERIFIED.value, nullable=False)
     verification_date = Column(String(50), nullable=True)
     source_notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     tracked_applications = relationship("TrackedApplication", back_populates="opportunity", cascade="all, delete-orphan")
+    # CRIT-02 & Correction 3: Protect audit history. passive_deletes="all" delegates constraint
+    # enforcement entirely to the database ON DELETE RESTRICT foreign key, preventing SQLAlchemy
+    # from issuing client-side cascading deletes of regulatory audit trails.
+    verification_logs = relationship(
+        "OpportunityVerificationLog",
+        back_populates="opportunity",
+        passive_deletes="all",
+        order_by="desc(OpportunityVerificationLog.created_at)"
+    )
+
+class OpportunityVerificationLog(Base):
+    __tablename__ = "opportunity_verification_logs"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    opportunity_id = Column(String(100), ForeignKey("opportunities.id", ondelete="RESTRICT"), nullable=False, index=True)
+    admin_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    admin_email = Column(String(255), nullable=True)
+    previous_status = Column(String(30), nullable=False)
+    new_status = Column(String(30), nullable=False)
+    official_source_url = Column(Text, nullable=True)
+    evidence_notes = Column(Text, nullable=False)
+    metadata_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_opp_ver_logs_opp_created", "opportunity_id", "created_at"),
+    )
+
+    opportunity = relationship("Opportunity", back_populates="verification_logs")
+    admin = relationship("User")
 
 class TrackedApplication(Base):
     __tablename__ = "tracked_applications"
