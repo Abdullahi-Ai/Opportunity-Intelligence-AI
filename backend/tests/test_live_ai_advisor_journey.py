@@ -1,14 +1,35 @@
 import uuid
 import pytest
 from app.config import settings
-from app.db.session import SessionLocal
-from app.models.entities import User, StudentProfile, Opportunity, TrackedApplication, ApplicationChecklist
+from app.db.session import SessionLocal, Base, engine
+from app.models.entities import User, StudentProfile, Opportunity, TrackedApplication, ApplicationChecklist, VerificationStatus
 from app.agent.orchestrator import AgentOrchestrator
 
 @pytest.fixture
 def db_session():
+    Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
+        opp = db.query(Opportunity).filter(Opportunity.id == "opp-safaricom-attachment-2026").first()
+        if not opp:
+            opp = Opportunity(
+                id="opp-safaricom-attachment-2026",
+                title="Safaricom PLC Technology Internship & Industrial Attachment 2026",
+                provider="Safaricom PLC",
+                category="Industrial Attachment",
+                target_audience="Continuing 2nd, 3rd, and 4th year undergraduate students in Kenyan universities",
+                fields_of_study="Computer Science, Software Engineering, Telecommunications, Information Technology, Data Science",
+                degree_levels="Undergraduate",
+                official_url="https://www.safaricom.co.ke/careers",
+                application_deadline="2026-11-30",
+                status="open",
+                is_verified=True,
+                verification_status=VerificationStatus.VERIFIED.value,
+                verification_date="2026-10-15",
+                source_notes="Official career portal verified opportunity."
+            )
+            db.add(opp)
+            db.commit()
         yield db
     finally:
         db.close()

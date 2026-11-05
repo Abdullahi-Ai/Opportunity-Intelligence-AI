@@ -530,3 +530,145 @@ def delete_opportunity(
     db.delete(opp)
     db.commit()
     return {"status": "success", "message": f"Opportunity {opportunity_id} successfully deleted."}
+
+
+# ============================================================================
+# STAGE 2.2B-3: ELIGIBILITY CRITERIA ADMINISTRATIVE WORKFLOWS
+# ============================================================================
+
+from app.schemas.criteria import (
+    CriterionResponse,
+    CriterionCreateRequest,
+    CriterionUpdateRequest,
+    CriterionVerifyRequest,
+    CriterionRejectRequest,
+    CriterionFlagRequest,
+    CriterionReopenRequest,
+    CriterionAuditLogResponse,
+)
+from app.services import opportunity_criteria_admin as crit_admin_service
+
+
+@router.get("/opportunities/{opportunity_id}/criteria", response_model=List[CriterionResponse])
+def list_criteria_for_opportunity(
+    opportunity_id: str,
+    status: Optional[str] = None,
+    type: Optional[str] = None,
+    admin_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """Administrator: List all structured eligibility criteria belonging to an opportunity."""
+    return crit_admin_service.list_opportunity_criteria(db, opportunity_id, status_filter=status, type_filter=type)
+
+
+@router.get("/criteria/pending", response_model=List[CriterionResponse])
+def list_pending_criteria(
+    limit: int = 50,
+    offset: int = 0,
+    status: str = "PENDING_REVIEW",
+    admin_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """Administrator: List criteria awaiting review or matching a specified status."""
+    return crit_admin_service.list_pending_criteria(db, limit=limit, offset=offset, status_filter=status)
+
+
+@router.get("/criteria/{criterion_id}", response_model=CriterionResponse)
+def get_criterion_detail(
+    criterion_id: str,
+    admin_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """Administrator: Retrieve details, source excerpt and verification state of a criterion."""
+    return crit_admin_service.get_criterion_detail(db, criterion_id)
+
+
+@router.post("/opportunities/{opportunity_id}/criteria", response_model=CriterionResponse, status_code=status.HTTP_201_CREATED)
+def create_criterion_manually(
+    opportunity_id: str,
+    payload: CriterionCreateRequest,
+    admin_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """Administrator: Manually create a structured eligibility criterion for an opportunity."""
+    if payload.evidence_url and not validate_url(payload.evidence_url):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid evidence URL: must be a valid public HTTP or HTTPS URL."
+        )
+    return crit_admin_service.create_manual_criterion(db, opportunity_id, admin_user, payload)
+
+
+@router.put("/criteria/{criterion_id}", response_model=CriterionResponse)
+def update_criterion(
+    criterion_id: str,
+    payload: CriterionUpdateRequest,
+    admin_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """Administrator: Update criterion values with mandatory audit trail explanation."""
+    if payload.evidence_url and not validate_url(payload.evidence_url):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid evidence URL: must be a valid public HTTP or HTTPS URL."
+        )
+    return crit_admin_service.update_criterion(db, criterion_id, admin_user, payload)
+
+
+@router.post("/criteria/{criterion_id}/verify", response_model=CriterionResponse)
+def verify_criterion(
+    criterion_id: str,
+    payload: CriterionVerifyRequest,
+    admin_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """Administrator: Certify a criterion as VERIFIED with authoritative evidence URL and audit notes."""
+    if not validate_url(payload.evidence_url):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid evidence URL: Verification requires a valid public HTTP or HTTPS source."
+        )
+    return crit_admin_service.verify_criterion(db, criterion_id, admin_user, payload)
+
+
+@router.post("/criteria/{criterion_id}/reject", response_model=CriterionResponse)
+def reject_criterion(
+    criterion_id: str,
+    payload: CriterionRejectRequest,
+    admin_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """Administrator: Reject a criterion with reason and record in immutable audit log."""
+    return crit_admin_service.reject_criterion(db, criterion_id, admin_user, payload)
+
+
+@router.post("/criteria/{criterion_id}/flag", response_model=CriterionResponse)
+def flag_criterion_for_review(
+    criterion_id: str,
+    payload: CriterionFlagRequest,
+    admin_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """Administrator: Flag a criterion as NEEDS_REVIEW with audit notes."""
+    return crit_admin_service.flag_criterion_review(db, criterion_id, admin_user, payload)
+
+
+@router.post("/criteria/{criterion_id}/reopen", response_model=CriterionResponse)
+def reopen_criterion(
+    criterion_id: str,
+    payload: CriterionReopenRequest,
+    admin_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """Administrator: Reopen a previously reviewed criterion back to PENDING_REVIEW."""
+    return crit_admin_service.reopen_criterion(db, criterion_id, admin_user, payload)
+
+
+@router.get("/criteria/{criterion_id}/history", response_model=List[CriterionAuditLogResponse])
+def get_criterion_audit_history(
+    criterion_id: str,
+    admin_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """Administrator: Retrieve chronological append-only audit trail for a criterion."""
+    return crit_admin_service.get_criterion_audit_history(db, criterion_id)

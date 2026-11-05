@@ -9,12 +9,38 @@ Verifies:
 """
 
 import uuid
+from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
 from app.config import settings
+from app.db.session import Base, engine, SessionLocal
+from app.models.entities import Opportunity, VerificationStatus
+from app.rag.ingest import sync_relational_opportunities
 
 client = TestClient(app)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def setup_opportunities_db():
+    Base.metadata.create_all(bind=engine)
+    raw_dir = Path(__file__).resolve().parent.parent / "data" / "raw_opportunities"
+    if raw_dir.exists():
+        sync_relational_opportunities(raw_dir)
+    db = SessionLocal()
+    try:
+        safaricom = db.query(Opportunity).filter(Opportunity.id == "opp-safaricom-attachment-2026").first()
+        if safaricom:
+            safaricom.is_verified = True
+            safaricom.verification_status = VerificationStatus.VERIFIED.value
+        hef = db.query(Opportunity).filter(Opportunity.id == "opp-hef-undergraduate-2026").first()
+        if hef:
+            hef.is_verified = True
+            hef.verification_status = VerificationStatus.VERIFIED.value
+        db.commit()
+    finally:
+        db.close()
+    yield
 
 def create_test_student(prefix: str):
     email = f"{prefix}_{uuid.uuid4().hex[:8]}@uonbi.ac.ke"

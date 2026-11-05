@@ -68,7 +68,8 @@ def test_production_accepts_strong_secrets():
         APP_ENV="production",
         SECRET_KEY="c84f9a12b67d890e1234567890abcdef1234567890abcdef1234567890abcdef",
         ADMIN_REGISTRATION_SECRET="kenya_admin_secure_token_9999_prod",
-        ALLOWED_ORIGINS="https://opportunity-intelligence-ai.vercel.app"
+        ALLOWED_ORIGINS="https://opportunity-intelligence-ai.vercel.app",
+        DATABASE_URL="postgresql+psycopg2://mock_user:mock_pw@localhost:5432/mock_db"
     )
     assert s.APP_ENV == "production"
 

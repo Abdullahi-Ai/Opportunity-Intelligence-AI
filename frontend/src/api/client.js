@@ -246,4 +246,38 @@ export const api = {
       method: 'DELETE',
     });
   },
+
+  // Stage 2.2B-3: Eligibility Criteria Review & Verification
+  getOpportunityCriteria: (oppId) => request(`/opportunities/${oppId}/criteria`),
+  adminGetOpportunityCriteria: (oppId) => request(`/admin/opportunities/${oppId}/criteria`),
+  adminGetPendingCriteria: (params = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return request(`/admin/criteria/pending${q ? `?${q}` : ''}`);
+  },
+  adminGetCriterionDetail: (critId) => request(`/admin/criteria/${critId}`),
+  adminCreateCriterion: (oppId, data) => request(`/admin/opportunities/${oppId}/criteria`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+  adminUpdateCriterion: (critId, data) => request(`/admin/criteria/${critId}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  }),
+  adminVerifyCriterion: (critId, data) => request(`/admin/criteria/${critId}/verify`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+  adminRejectCriterion: (critId, data) => request(`/admin/criteria/${critId}/reject`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+  adminFlagCriterion: (critId, data) => request(`/admin/criteria/${critId}/flag`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+  adminReopenCriterion: (critId, data) => request(`/admin/criteria/${critId}/reopen`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+  adminGetCriterionHistory: (critId) => request(`/admin/criteria/${critId}/history`),
 };

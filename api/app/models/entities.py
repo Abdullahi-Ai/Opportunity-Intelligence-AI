@@ -20,13 +20,44 @@ from sqlalchemy import (
     ForeignKey,
     Text,
     UniqueConstraint,
-    Index
+    Index,
+    Numeric,
+    CheckConstraint,
+    event
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, validates
 from app.db.session import Base
 
 class VerificationStatus(str, Enum):
     UNVERIFIED = "UNVERIFIED"
+    PENDING_REVIEW = "PENDING_REVIEW"
+    VERIFIED = "VERIFIED"
+    NEEDS_REVIEW = "NEEDS_REVIEW"
+    REJECTED = "REJECTED"
+
+class CriterionCategory(str, Enum):
+    """Controlled vocabulary of opportunity eligibility criterion categories."""
+    MINIMUM_ACADEMIC_GRADE = "MINIMUM_ACADEMIC_GRADE"
+    KCSE_GRADE = "KCSE_GRADE"
+    NUMERIC_GPA = "NUMERIC_GPA"
+    COUNTY_RESTRICTION = "COUNTY_RESTRICTION"
+    GEOGRAPHIC_ALLOCATION = "GEOGRAPHIC_ALLOCATION"
+    GRADUATION_YEAR_RANGE = "GRADUATION_YEAR_RANGE"
+    MONTHS_SINCE_GRADUATION = "MONTHS_SINCE_GRADUATION"
+    EXPECTED_GRADUATION_WINDOW = "EXPECTED_GRADUATION_WINDOW"
+    ACADEMIC_STANDING = "ACADEMIC_STANDING"
+    OTHER = "OTHER"
+
+class CriterionOperator(str, Enum):
+    """Controlled vocabulary of criterion evaluation operators."""
+    GTE = "GTE"
+    LTE = "LTE"
+    EQ = "EQ"
+    IN = "IN"
+    BETWEEN = "BETWEEN"
+
+class CriterionVerificationStatus(str, Enum):
+    """Controlled criterion-specific verification status."""
     PENDING_REVIEW = "PENDING_REVIEW"
     VERIFIED = "VERIFIED"
     NEEDS_REVIEW = "NEEDS_REVIEW"
@@ -101,6 +132,15 @@ class Opportunity(Base):
         passive_deletes="all",
         order_by="desc(OpportunityVerificationLog.created_at)"
     )
+    # Stage 2.2B-1: Protect eligibility criteria. passive_deletes="all" delegates constraint
+    # enforcement entirely to the database ON DELETE RESTRICT foreign key, ensuring an opportunity
+    # cannot be deleted while eligibility criteria exist.
+    eligibility_criteria = relationship(
+        "OpportunityEligibilityCriterion",
+        back_populates="opportunity",
+        passive_deletes="all",
+        order_by="asc(OpportunityEligibilityCriterion.created_at)"
+    )
 
 class OpportunityVerificationLog(Base):
     __tablename__ = "opportunity_verification_logs"
@@ -122,6 +162,186 @@ class OpportunityVerificationLog(Base):
 
     opportunity = relationship("Opportunity", back_populates="verification_logs")
     admin = relationship("User")
+
+class OpportunityEligibilityCriterion(Base):
+    __tablename__ = "opportunity_eligibility_criteria"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    opportunity_id = Column(String(100), ForeignKey("opportunities.id", ondelete="RESTRICT"), nullable=False, index=True)
+    criterion_type = Column(String(50), nullable=False, index=True)
+    operator = Column(String(20), nullable=False)
+    criterion_value = Column(String(255), nullable=False)
+    grading_system = Column(String(50), nullable=True)
+    numeric_scale = Column(Numeric(6, 2), nullable=True)
+    is_mandatory = Column(Boolean, nullable=False, default=True)
+    source_text = Column(Text, nullable=False)
+    evidence_url = Column(Text, nullable=True)
+    verification_status = Column(
+        String(30),
+        nullable=False,
+        default=CriterionVerificationStatus.PENDING_REVIEW.value,
+        index=True
+    )
+    verified_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    verified_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_opp_crit_opp_type", "opportunity_id", "criterion_type"),
+        Index("ix_opp_crit_opp_status", "opportunity_id", "verification_status"),
+        CheckConstraint(
+            "criterion_type IN ("
+            "'MINIMUM_ACADEMIC_GRADE', 'KCSE_GRADE', 'NUMERIC_GPA', "
+            "'COUNTY_RESTRICTION', 'GEOGRAPHIC_ALLOCATION', 'GRADUATION_YEAR_RANGE', "
+            "'MONTHS_SINCE_GRADUATION', 'EXPECTED_GRADUATION_WINDOW', 'ACADEMIC_STANDING', 'OTHER'"
+            ")",
+            name="ck_opp_crit_type"
+        ),
+        CheckConstraint(
+            "operator IN ('GTE', 'LTE', 'EQ', 'IN', 'BETWEEN')",
+            name="ck_opp_crit_operator"
+        ),
+        CheckConstraint(
+            "verification_status IN ('PENDING_REVIEW', 'VERIFIED', 'NEEDS_REVIEW', 'REJECTED')",
+            name="ck_opp_crit_status"
+        ),
+        CheckConstraint(
+            "length(trim(source_text)) > 0",
+            name="ck_opp_crit_source_text_not_empty"
+        ),
+        CheckConstraint(
+            "length(trim(criterion_value)) > 0",
+            name="ck_opp_crit_value_not_empty"
+        ),
+        CheckConstraint(
+            "numeric_scale IS NULL OR numeric_scale > 0",
+            name="ck_opp_crit_numeric_scale_positive"
+        ),
+        CheckConstraint(
+            "(verification_status != 'VERIFIED') OR "
+            "(verified_at IS NOT NULL AND evidence_url IS NOT NULL AND length(trim(evidence_url)) > 0)",
+            name="ck_opp_crit_verified_requirements"
+        ),
+        CheckConstraint(
+            "(verification_status != 'PENDING_REVIEW') OR (verified_at IS NULL)",
+            name="ck_opp_crit_pending_no_verified_meta"
+        ),
+    )
+
+    opportunity = relationship("Opportunity", back_populates="eligibility_criteria")
+    verified_by_admin = relationship("User")
+    # Phase 2 Stage 2.2B-1A: Protect criterion audit history. passive_deletes="all" delegates constraint
+    # enforcement entirely to the database ON DELETE RESTRICT foreign key, preventing SQLAlchemy
+    # from issuing client-side cascading deletes of regulatory audit trails.
+    verification_logs = relationship(
+        "OpportunityCriterionVerificationLog",
+        back_populates="criterion",
+        passive_deletes="all",
+        order_by="desc(OpportunityCriterionVerificationLog.created_at)"
+    )
+
+    @validates("criterion_type")
+    def validate_criterion_type(self, key, value):
+        valid = {c.value for c in CriterionCategory}
+        if value not in valid:
+            raise ValueError(f"Invalid criterion_type '{value}'. Must be one of: {sorted(valid)}")
+        return value
+
+    @validates("operator")
+    def validate_operator(self, key, value):
+        valid = {o.value for o in CriterionOperator}
+        if value not in valid:
+            raise ValueError(f"Invalid operator '{value}'. Must be one of: {sorted(valid)}")
+        return value
+
+    @validates("verification_status")
+    def validate_verification_status(self, key, value):
+        valid = {s.value for s in CriterionVerificationStatus}
+        if value not in valid:
+            raise ValueError(f"Invalid verification_status '{value}'. Must be one of: {sorted(valid)}")
+        return value
+
+    @validates("source_text")
+    def validate_source_text(self, key, value):
+        if value is None or not str(value).strip():
+            raise ValueError("source_text cannot be empty or whitespace-only.")
+        return str(value).strip()
+
+    @validates("criterion_value")
+    def validate_criterion_value(self, key, value):
+        if value is None or not str(value).strip():
+            raise ValueError("criterion_value cannot be empty or whitespace-only.")
+        return str(value).strip()
+
+    @validates("numeric_scale")
+    def validate_numeric_scale(self, key, value):
+        if value is not None and float(value) <= 0:
+            raise ValueError("numeric_scale must be strictly greater than zero.")
+        return value
+
+@event.listens_for(OpportunityEligibilityCriterion, "before_insert")
+@event.listens_for(OpportunityEligibilityCriterion, "before_update")
+def validate_criterion_invariants(mapper, connection, target):
+    """Enforces criterion verification invariants before persisting to database."""
+    if target.verification_status == CriterionVerificationStatus.VERIFIED.value:
+        if not target.verified_by:
+            raise ValueError("A VERIFIED criterion must specify a non-empty verified_by administrator identity.")
+        if target.verified_at is None:
+            raise ValueError("A VERIFIED criterion must specify a non-null verified_at timestamp.")
+        if not target.evidence_url or not str(target.evidence_url).strip():
+            raise ValueError("A VERIFIED criterion must specify a non-empty authoritative evidence_url.")
+    elif target.verification_status == CriterionVerificationStatus.PENDING_REVIEW.value:
+        if target.verified_by is not None or target.verified_at is not None:
+            raise ValueError("A PENDING_REVIEW criterion must not retain verified_by or verified_at metadata.")
+
+class OpportunityCriterionVerificationLog(Base):
+    __tablename__ = "opportunity_criterion_verification_logs"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    criterion_id = Column(String(36), ForeignKey("opportunity_eligibility_criteria.id", ondelete="RESTRICT"), nullable=False, index=True)
+    admin_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    admin_email = Column(String(255), nullable=True)
+    event_type = Column(String(50), nullable=False, default="STATUS_CHANGE")
+    previous_status = Column(String(30), nullable=False)
+    new_status = Column(String(30), nullable=False)
+    before_snapshot = Column(Text, nullable=True)
+    after_snapshot = Column(Text, nullable=True)
+    evidence_url = Column(Text, nullable=True)
+    evidence_notes = Column(Text, nullable=False)
+    metadata_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_crit_ver_logs_crit_created", "criterion_id", "created_at"),
+        CheckConstraint(
+            "previous_status IN ('PENDING_REVIEW', 'VERIFIED', 'NEEDS_REVIEW', 'REJECTED')",
+            name="ck_crit_log_prev_status"
+        ),
+        CheckConstraint(
+            "new_status IN ('PENDING_REVIEW', 'VERIFIED', 'NEEDS_REVIEW', 'REJECTED')",
+            name="ck_crit_log_new_status"
+        ),
+        CheckConstraint(
+            "length(trim(evidence_notes)) > 0",
+            name="ck_crit_log_notes_not_empty"
+        ),
+    )
+
+    criterion = relationship("OpportunityEligibilityCriterion", back_populates="verification_logs")
+    admin = relationship("User")
+
+
+@event.listens_for(OpportunityCriterionVerificationLog, "before_update")
+def prevent_audit_log_update(mapper, connection, target):
+    """Enforces ORM-level append-only immutability for criterion verification audit logs."""
+    raise ValueError("OpportunityCriterionVerificationLog records are immutable and cannot be updated.")
+
+
+@event.listens_for(OpportunityCriterionVerificationLog, "before_delete")
+def prevent_audit_log_delete(mapper, connection, target):
+    """Enforces ORM-level append-only immutability for criterion verification audit logs."""
+    raise ValueError("OpportunityCriterionVerificationLog records are immutable and cannot be deleted.")
 
 class TrackedApplication(Base):
     __tablename__ = "tracked_applications"

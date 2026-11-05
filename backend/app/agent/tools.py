@@ -18,7 +18,8 @@ from app.rag import get_vector_store
 from app.services.matching_engine import (
     evaluate_degree_level,
     evaluate_field_of_study,
-    evaluate_academic_year_and_standing
+    evaluate_academic_year_and_standing,
+    evaluate_opportunity_eligibility
 )
 
 logger = logging.getLogger(__name__)
@@ -359,12 +360,64 @@ class AssessEligibilityInput(BaseModel):
     student_field_of_study: str = Field(description="Student major/course e.g. 'Computer Science'")
     student_year_of_study: int = Field(description="Current year of study e.g. 1, 2, 3, 4")
     student_kcse_grade: Optional[str] = Field(default=None, description="e.g. 'A', 'B+', 'B', 'B-'")
+    gpa_or_grade: Optional[str] = Field(default=None, description="Academic grade or GPA (e.g. 'First Class Honours', '3.5/4.0')")
+    county_of_origin: Optional[str] = Field(default=None, description="Kenyan county of origin e.g. 'Turkana'")
+    graduation_year: Optional[int] = Field(default=None, description="Graduation year e.g. 2024")
+    expected_graduation: Optional[str] = Field(default=None, description="Expected graduation e.g. 'December 2026'")
 
 def tool_assess_eligibility(input_data: AssessEligibilityInput, db: Optional[Session] = None) -> Dict[str, Any]:
     """
     Evaluates published opportunity criteria against student parameters.
     Returns criteria breakdown classified as Meets, Does Not Meet, or Needs Verification.
     """
+    from app.models.entities import Opportunity, OpportunityEligibilityCriterion
+    from app.db.session import SessionLocal
+
+    close_session = False
+    s = db
+    if s is None:
+        s = SessionLocal()
+        close_session = True
+
+    try:
+        rel_opp = s.query(Opportunity).filter(Opportunity.id == input_data.opportunity_id).first()
+        if rel_opp:
+            student_proxy = type("StudentProxy", (), {
+                "degree_level": input_data.student_degree_level,
+                "field_of_study": input_data.student_field_of_study,
+                "year_of_study": input_data.student_year_of_study,
+                "specialisations": None,
+                "gpa_or_grade": input_data.gpa_or_grade or input_data.student_kcse_grade,
+                "county_of_origin": input_data.county_of_origin,
+                "graduation_year": input_data.graduation_year,
+                "expected_graduation": input_data.expected_graduation,
+                "country": "Kenya"
+            })()
+            crit_list = s.query(OpportunityEligibilityCriterion).filter_by(opportunity_id=rel_opp.id).all()
+            overall_status, breakdown, _ = evaluate_opportunity_eligibility(student_proxy, rel_opp, criteria=crit_list)
+
+            if overall_status == "Does not meet requirements":
+                overall = "Ineligible / Unlikely to Meet Criteria"
+            elif overall_status == "Needs verification":
+                overall = "Conditionally Eligible (Requires Verification)"
+            else:
+                overall = "Likely Eligible"
+
+            return {
+                "status": "success",
+                "opportunity_id": rel_opp.id,
+                "title": rel_opp.title,
+                "provider": rel_opp.provider,
+                "official_url": rel_opp.official_url,
+                "overall_assessment": overall,
+                "criteria_breakdown": breakdown,
+                "source": "deterministic_criteria_evaluator"
+            }
+    finally:
+        if close_session and s is not None:
+            s.close()
+
+    # Fallback to vector search if opportunity is not in relational database
     results = []
     try:
         results = get_vector_store().search(
@@ -373,7 +426,7 @@ def tool_assess_eligibility(input_data: AssessEligibilityInput, db: Optional[Ses
         )
     except Exception as exc:
         logger.warning(
-            "Vector retrieval for eligibility assessment failed (%s: %s). Checking relational database fallback.",
+            "Vector retrieval for eligibility assessment failed (%s: %s).",
             type(exc).__name__,
             str(exc)
         )
@@ -383,34 +436,6 @@ def tool_assess_eligibility(input_data: AssessEligibilityInput, db: Optional[Ses
         if r["metadata"].get("opportunity_id") == input_data.opportunity_id:
             matching_chunk = r
             break
-
-    if not matching_chunk:
-        from app.models.entities import Opportunity
-        from app.db.session import SessionLocal
-        close_session = False
-        s = db
-        if s is None:
-            s = SessionLocal()
-            close_session = True
-        try:
-            rel_opp = s.query(Opportunity).filter(Opportunity.id == input_data.opportunity_id).first()
-            if rel_opp:
-                matching_chunk = {
-                    "metadata": {
-                        "opportunity_id": rel_opp.id,
-                        "title": rel_opp.title,
-                        "provider": rel_opp.provider,
-                        "category": rel_opp.category,
-                        "degree_levels": rel_opp.degree_levels or "",
-                        "fields_of_study": rel_opp.fields_of_study or "",
-                        "official_url": rel_opp.official_url,
-                        "application_deadline": rel_opp.application_deadline
-                    },
-                    "content": rel_opp.source_notes or f"Opportunity {rel_opp.title} by {rel_opp.provider}."
-                }
-        finally:
-            if close_session and s is not None:
-                s.close()
 
     if not matching_chunk:
         return {
@@ -478,6 +503,7 @@ def tool_assess_eligibility(input_data: AssessEligibilityInput, db: Optional[Ses
         "official_url": meta.get("official_url"),
         "overall_assessment": overall,
         "criteria_breakdown": evaluations,
+        "source": "deterministic_vector_fallback",
         "disclaimer": "This automated assessment is an informational guide based on published criteria. Final eligibility is determined exclusively by the sponsoring organization."
     }
 

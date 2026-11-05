@@ -19,7 +19,14 @@ from sqlalchemy import or_, and_, func
 
 from app.config import settings
 from app.db.session import get_db, Base, engine
-from app.models.entities import User, StudentProfile, Opportunity, TrackedApplication, ApplicationChecklist
+from app.models.entities import (
+    User,
+    StudentProfile,
+    Opportunity,
+    TrackedApplication,
+    ApplicationChecklist,
+    OpportunityEligibilityCriterion,
+)
 from app.core.auth import get_current_user
 from app.agent.tools import (
     tool_calculate_deadline_countdown,
@@ -31,6 +38,7 @@ from app.services.matching_engine import (
     evaluate_degree_level,
     evaluate_field_of_study,
     evaluate_academic_year_and_standing,
+    evaluate_opportunity_eligibility,
     calculate_match_score,
     get_match_sort_key,
     UNIVERSAL_FIELD_KEYWORDS,
@@ -197,7 +205,7 @@ class PersonalizedMatchItem(BaseModel):
     match_score: int
     match_explanation: str
     is_saved: bool = False
-    criteria_breakdown: List[Dict[str, str]] = []
+    criteria_breakdown: List[Dict[str, Any]] = []
 
 class PersonalizedMatchesResponse(BaseModel):
     student_id: str
@@ -241,60 +249,14 @@ def calculate_personalized_matches(student: StudentProfile, db: Session) -> Pers
         dl_label = cd.get("status_label") or opp.status
         is_open = cd.get("is_open", False)
 
-        breakdown = []
-
-        # 1. Authoritative degree level evaluation
-        deg_meets, deg_status, deg_reason = evaluate_degree_level(
-            student_deg,
-            opp.degree_levels
-        )
-        breakdown.append({
-            "criterion": "Degree Level",
-            "required": opp.degree_levels or "All Degree Levels",
-            "provided": student.degree_level,
-            "status": deg_status
-        })
-
-        # 2. Authoritative field of study evaluation
-        field_meets, field_status, field_reason = evaluate_field_of_study(
-            student_field,
-            student_specs,
-            opp.fields_of_study
-        )
-        breakdown.append({
-            "criterion": "Field of Study",
-            "required": opp.fields_of_study or "All Fields",
-            "provided": student.field_of_study,
-            "status": field_status
-        })
-
-        # 3. Academic year & student standing evaluation
-        yr_meets, yr_status, yr_reason, yr_crit = evaluate_academic_year_and_standing(
-            student_yr,
-            opp.title,
-            opp.id,
-            target_audience=opp.target_audience,
-            category=opp.category,
-            degree_levels=opp.degree_levels,
-            source_notes=opp.source_notes
-        )
-        if yr_crit is not None:
-            criterion_label = "Continuing Student Year (Attachment)" if yr_crit["criterion"] == "Year of Study (Attachment)" else yr_crit["criterion"]
-            breakdown.append({
-                "criterion": criterion_label,
-                "required": yr_crit["required"],
-                "provided": yr_crit["provided"],
-                "status": yr_crit["status"]
-            })
-
-        # 4. Overall eligibility status classification
-        statuses = [b["status"] for b in breakdown]
-        if "Does Not Meet" in statuses:
-            eligibility_status = "Does not meet requirements"
-        elif "Needs Verification" in statuses:
-            eligibility_status = "Needs verification"
-        else:
-            eligibility_status = "Meets requirements"
+        # Authoritative eligibility evaluation (structured criteria + baseline academic checks)
+        crit_list = db.query(OpportunityEligibilityCriterion).filter_by(opportunity_id=opp.id).all()
+        eligibility_status, breakdown, meta = evaluate_opportunity_eligibility(student, opp, criteria=crit_list)
+        deg_meets = meta["deg_meets"]
+        field_status = meta["field_status"]
+        yr_crit = None
+        yr_meets = True
+        yr_reason = meta["yr_reason"]
 
         # 5. Deterministic scoring
         cleaned_fields = clean_text(opp.fields_of_study)
@@ -906,4 +868,23 @@ def get_tracked_application_detail(
         if tracked_app.student_id != student.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
     return tracked_app
+
+
+from app.schemas.criteria import CriterionResponse
+
+@router.get("/opportunities/{opportunity_id}/criteria", response_model=List[CriterionResponse])
+def get_opportunity_criteria_public(
+    opportunity_id: str,
+    db: Session = Depends(get_db)
+):
+    """Public / Student: Retrieve structured eligibility criteria for an opportunity."""
+    opp = db.query(Opportunity).filter(Opportunity.id == opportunity_id).first()
+    if not opp:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Opportunity not found.")
+    return (
+        db.query(OpportunityEligibilityCriterion)
+        .filter(OpportunityEligibilityCriterion.opportunity_id == opportunity_id)
+        .order_by(OpportunityEligibilityCriterion.created_at.asc())
+        .all()
+    )
 

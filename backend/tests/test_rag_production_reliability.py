@@ -10,6 +10,7 @@ Tests for Production RAG Reliability:
 
 import io
 import os
+from pathlib import Path
 import shutil
 import socket
 import sys
@@ -22,6 +23,9 @@ from unittest.mock import patch, MagicMock
 import numpy as np
 import pytest
 
+from app.db.session import Base, engine, SessionLocal
+from app.models.entities import Opportunity, VerificationStatus
+from app.rag.ingest import sync_relational_opportunities
 from app.rag.embeddings import (
     RobustEmbeddingFunction,
     download_and_extract_model,
@@ -35,6 +39,23 @@ from app.agent.tools import (
     tool_search_opportunities,
     _search_opportunities_relational_fallback
 )
+
+
+@pytest.fixture(scope="module", autouse=True)
+def setup_opportunities_db():
+    Base.metadata.create_all(bind=engine)
+    raw_dir = Path(__file__).resolve().parent.parent / "data" / "raw_opportunities"
+    if raw_dir.exists():
+        sync_relational_opportunities(raw_dir)
+    db = SessionLocal()
+    try:
+        for opp in db.query(Opportunity).all():
+            opp.is_verified = True
+            opp.verification_status = VerificationStatus.VERIFIED.value
+        db.commit()
+    finally:
+        db.close()
+    yield
 
 
 def _create_dummy_tar_archive(entries=None, malicious_entry=None):
@@ -254,7 +275,7 @@ def test_vector_retrieval_failure_relational_fallback():
         assert safaricom_result is not None
         assert safaricom_result["provider"] == "Safaricom PLC"
         assert safaricom_result["official_url"] == "https://www.safaricom.co.ke/careers"
-        assert safaricom_result["verification_status"] == "verified"
+        assert safaricom_result["verification_status"].lower() == "verified"
 
 
 # 11. Relational fallback returning no results when query doesn't match
@@ -297,7 +318,7 @@ def test_preservation_of_official_opportunity_metadata():
         assert len(opp["title"]) > 0
         assert len(opp["provider"]) > 0
         assert opp["official_url"].startswith("https://")
-        assert opp["verification_status"] == "verified"
+        assert opp["verification_status"].lower() == "verified"
         assert opp["deadline"] is not None
         assert opp["similarity_score"] >= 0.50
         assert opp["retrieval_mode"] == "relational_fallback"

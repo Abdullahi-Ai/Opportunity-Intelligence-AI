@@ -1,7 +1,35 @@
-import React from 'react';
-import { X, ShieldCheck, ExternalLink, Calendar, Bookmark, BookmarkCheck, CheckSquare, Sparkles, AlertCircle, Clock } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, ShieldCheck, ExternalLink, Calendar, Bookmark, BookmarkCheck, Sparkles, AlertCircle, Clock, CheckCircle2, XCircle, FileText, ChevronDown, ChevronUp } from 'lucide-react';
+import { api } from '../api/client';
 
 export default function OpportunityModal({ opportunity, onClose, onCheckEligibility, onSave, isTracked }) {
+  const [criteria, setCriteria] = useState([]);
+  const [loadingCriteria, setLoadingCriteria] = useState(false);
+  const [criteriaError, setCriteriaError] = useState(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    if (opportunity && opportunity.id) {
+      setLoadingCriteria(true);
+      setCriteriaError(null);
+      api.getOpportunityCriteria(opportunity.id)
+        .then(res => {
+          if (isMounted) {
+            setCriteria(Array.isArray(res) ? res : []);
+            setLoadingCriteria(false);
+          }
+        })
+        .catch(err => {
+          if (isMounted) {
+            // Non-blocking: fail quietly if criteria are not loaded
+            setCriteria([]);
+            setLoadingCriteria(false);
+          }
+        });
+    }
+    return () => { isMounted = false; };
+  }, [opportunity?.id]);
+
   if (!opportunity) return null;
 
   return (
@@ -84,6 +112,83 @@ export default function OpportunityModal({ opportunity, onClose, onCheckEligibil
               </p>
             </div>
           )}
+
+          {/* Structured Eligibility Criteria Section */}
+          <div className="border border-slate-200 rounded-2xl p-4 bg-slate-50/50">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="font-bold text-xs uppercase tracking-wider text-slate-600 flex items-center space-x-1.5">
+                <CheckCircle2 className="w-4 h-4 text-brand-600" />
+                <span>Structured Eligibility Criteria</span>
+              </h4>
+              <span className="text-xs text-slate-400">
+                {loadingCriteria ? 'Loading...' : `${criteria.length} recorded`}
+              </span>
+            </div>
+
+            {loadingCriteria ? (
+              <div className="text-center py-4 text-xs text-slate-400 animate-pulse">
+                Fetching structured eligibility requirements...
+              </div>
+            ) : criteria.length === 0 ? (
+              <p className="text-xs text-slate-500 italic p-2 bg-white rounded-lg border border-slate-100">
+                No structured criteria extracted yet for this opportunity. Eligibility is assessed against overall program guidelines.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {criteria.map((c) => (
+                  <div key={c.id} className="p-3 bg-white rounded-xl border border-slate-200 shadow-sm text-xs space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center space-x-1.5 flex-wrap">
+                        <span className="font-bold text-slate-800 uppercase text-[10px] tracking-wide px-2 py-0.5 rounded bg-slate-100 border border-slate-200">
+                          {c.criterion_type.replace('_', ' ')}
+                        </span>
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${
+                          c.is_mandatory 
+                            ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                            : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                        }`}>
+                          {c.is_mandatory ? 'Mandatory' : 'Desirable'}
+                        </span>
+                        {c.target_scale && (
+                          <span className="text-[10px] font-medium text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-200">
+                            Scale: {c.target_scale}
+                          </span>
+                        )}
+                      </div>
+                      <span className={`flex items-center space-x-1 text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                        c.verification_status === 'VERIFIED'
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          : c.verification_status === 'NEEDS_REVIEW'
+                          ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                          : c.verification_status === 'REJECTED'
+                          ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                          : 'bg-sky-50 text-sky-700 border border-sky-200'
+                      }`}>
+                        {c.verification_status === 'VERIFIED' && <ShieldCheck className="w-3 h-3 text-emerald-600" />}
+                        {c.verification_status === 'NEEDS_REVIEW' && <AlertCircle className="w-3 h-3 text-amber-600" />}
+                        {c.verification_status === 'REJECTED' && <XCircle className="w-3 h-3 text-rose-600" />}
+                        {c.verification_status === 'PENDING_REVIEW' && <Clock className="w-3 h-3 text-sky-600" />}
+                        <span>{c.verification_status}</span>
+                      </span>
+                    </div>
+
+                    <div className="text-slate-800 font-medium pt-1">
+                      Requirement:{' '}
+                      <span className="font-semibold text-brand-900">
+                        {c.operator.toLowerCase().replace('_', ' ')} {JSON.stringify(c.canonical_value)}
+                      </span>
+                    </div>
+
+                    {c.source_text && (
+                      <div className="text-[11px] text-slate-500 italic bg-slate-50 p-2 rounded border border-slate-100">
+                        "{c.source_text}"
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           {opportunity.source_notes && (
             <div className="p-3 bg-brand-50/60 rounded-xl border border-brand-100 text-xs text-brand-900 leading-relaxed">

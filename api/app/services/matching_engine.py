@@ -738,3 +738,456 @@ def get_match_sort_key(
         created_timestamp = 0.0
 
     return (status_rank, score_rank, urgency_rank, created_timestamp, str(opportunity_id))
+
+
+# ============================================================================
+# STAGE 2.2C: STRUCTURED ELIGIBILITY CRITERIA DETERMINISTIC EVALUATION
+# ============================================================================
+
+from app.services.academic_profile_normalization import (
+    normalize_academic_grade,
+    normalize_county,
+    validate_graduation_year,
+    normalize_expected_graduation,
+    GradingSystem,
+    CanonicalHonours,
+    CanonicalKCSE,
+    NormalizationStatus,
+)
+
+HONOURS_RANK: Dict[str, int] = {
+    CanonicalHonours.FIRST_CLASS.value: 4,
+    CanonicalHonours.UPPER_SECOND.value: 3,
+    CanonicalHonours.LOWER_SECOND.value: 2,
+    CanonicalHonours.PASS.value: 1,
+}
+
+KCSE_RANK: Dict[str, int] = {
+    "A": 12, "A-": 11, "B+": 10, "B": 9, "B-": 8,
+    "C+": 7, "C": 6, "C-": 5, "D+": 4, "D": 3, "D-": 2, "E": 1
+}
+
+
+def evaluate_structured_criterion(
+    student: Any,
+    criterion: Any
+) -> Dict[str, Any]:
+    """
+    Deterministically assesses an individual structured criterion against a student profile.
+    
+    Invariants Enforced:
+    1. Only VERIFIED criteria can cause 'Does Not Meet'. Unverified criteria yield at most 'Needs Verification'.
+    2. Desirable criteria (is_mandatory=False) never cause 'Does Not Meet'.
+    3. Missing profile info yields 'Needs Verification'.
+    4. Incompatible grading systems yield 'Needs Verification' without invented equivalence.
+    5. Quotas / allocations never act as exclusionary restrictions.
+    """
+    c_type = getattr(criterion, "criterion_type", "OTHER")
+    c_op = getattr(criterion, "operator", "EQ")
+    c_val = str(getattr(criterion, "criterion_value", "")).strip()
+    is_mandatory = getattr(criterion, "is_mandatory", True)
+    ver_status = getattr(criterion, "verification_status", "PENDING_REVIEW")
+    is_verified = (ver_status == "VERIFIED")
+    evidence_url = getattr(criterion, "evidence_url", None)
+
+    # Base item template
+    item: Dict[str, Any] = {
+        "criterion_id": getattr(criterion, "id", None),
+        "criterion": c_type.replace("_", " ").title(),
+        "criterion_type": c_type,
+        "operator": c_op,
+        "required": c_val,
+        "provided": "Not Specified",
+        "status": "Needs Verification",
+        "is_mandatory": is_mandatory,
+        "verification_status": ver_status,
+        "explanation": "",
+        "evidence_url": evidence_url,
+    }
+
+    # Helper: apply verification and mandatory boundaries to final status
+    def resolve_status(preliminary_meets: bool, failure_explanation: str, success_explanation: str) -> Tuple[str, str]:
+        if preliminary_meets:
+            if is_verified:
+                return ("Meets", success_explanation)
+            else:
+                return ("Needs Verification", f"{success_explanation} (Criterion is pending administrative verification)")
+        else:
+            if not is_mandatory:
+                return ("Meets", f"{failure_explanation} (Desirable preference does not disqualify)")
+            if not is_verified:
+                return ("Needs Verification", f"{failure_explanation} (Criterion unverified; requires verification before exclusion)")
+            return ("Does Not Meet", failure_explanation)
+
+    # 1. MINIMUM ACADEMIC GRADE (Degree Classifications)
+    if c_type == "MINIMUM_ACADEMIC_GRADE":
+        raw_grade = getattr(student, "gpa_or_grade", None)
+        item["provided"] = raw_grade or "Missing from profile"
+        if not raw_grade or not str(raw_grade).strip():
+            item["status"] = "Needs Verification"
+            item["explanation"] = "Student profile lacks academic degree classification"
+            return item
+
+        student_norm = normalize_academic_grade(raw_grade)
+        if student_norm.status != NormalizationStatus.NORMALIZED:
+            item["status"] = "Needs Verification"
+            item["explanation"] = f"Academic grade '{raw_grade}' is unverified or ambiguous"
+            return item
+
+        if student_norm.grading_system != GradingSystem.KENYAN_UNIVERSITY_HONOURS:
+            item["status"] = "Needs Verification"
+            item["explanation"] = f"Student grade is in system '{student_norm.grading_system.value}'; cannot safely convert to honours degree without explicit conversion"
+            return item
+
+        student_rank = HONOURS_RANK.get(student_norm.normalized_classification, 0)
+        req_rank = HONOURS_RANK.get(c_val, 0)
+
+        preliminary = (student_rank >= req_rank) if c_op == "GTE" else (student_rank == req_rank)
+        status_val, expl = resolve_status(
+            preliminary,
+            failure_explanation=f"Requires {c_val}; provided {student_norm.normalized_classification}",
+            success_explanation=f"Satisfies minimum grade requirement ({student_norm.normalized_classification} >= {c_val})"
+        )
+        item["status"] = status_val
+        item["explanation"] = expl
+        return item
+
+    # 2. KCSE GRADE
+    elif c_type == "KCSE_GRADE":
+        raw_grade = getattr(student, "gpa_or_grade", None)
+        item["provided"] = raw_grade or "Missing from profile"
+        if not raw_grade or not str(raw_grade).strip():
+            item["status"] = "Needs Verification"
+            item["explanation"] = "Student profile does not record secondary (KCSE) mean grade"
+            return item
+
+        student_norm = normalize_academic_grade(raw_grade)
+        if student_norm.grading_system != GradingSystem.KCSE or not student_norm.normalized_classification:
+            item["status"] = "Needs Verification"
+            item["explanation"] = f"Student profile grade '{raw_grade}' is not a KCSE secondary mean grade"
+            return item
+
+        student_rank = KCSE_RANK.get(student_norm.normalized_classification, 0)
+        req_rank = KCSE_RANK.get(c_val, 0)
+
+        preliminary = (student_rank >= req_rank) if c_op == "GTE" else (student_rank == req_rank)
+        status_val, expl = resolve_status(
+            preliminary,
+            failure_explanation=f"Requires KCSE {c_val}; provided {student_norm.normalized_classification}",
+            success_explanation=f"Satisfies KCSE requirement ({student_norm.normalized_classification} >= {c_val})"
+        )
+        item["status"] = status_val
+        item["explanation"] = expl
+        return item
+
+    # 3. NUMERIC GPA
+    elif c_type == "NUMERIC_GPA":
+        raw_grade = getattr(student, "gpa_or_grade", None)
+        item["provided"] = raw_grade or "Missing from profile"
+        if not raw_grade or not str(raw_grade).strip():
+            item["status"] = "Needs Verification"
+            item["explanation"] = "Student profile lacks numeric GPA"
+            return item
+
+        student_norm = normalize_academic_grade(raw_grade)
+        if student_norm.grading_system != GradingSystem.NUMERIC_GPA or student_norm.numeric_value is None:
+            item["status"] = "Needs Verification"
+            item["explanation"] = f"Student grade '{raw_grade}' is not a numeric GPA; scale conversion unsupported"
+            return item
+
+        crit_scale = float(getattr(criterion, "numeric_scale", 4.0) or 4.0)
+        student_scale = student_norm.numeric_scale or 4.0
+        if abs(student_scale - crit_scale) > 0.1:
+            item["status"] = "Needs Verification"
+            item["explanation"] = f"Scale mismatch: opportunity requires scale {crit_scale}, student has scale {student_scale}"
+            return item
+
+        try:
+            req_gpa = float(c_val)
+            stud_gpa = float(student_norm.numeric_value)
+            preliminary = (stud_gpa >= req_gpa) if c_op == "GTE" else (stud_gpa <= req_gpa)
+            status_val, expl = resolve_status(
+                preliminary,
+                failure_explanation=f"Requires GPA {req_gpa:.2f}/{crit_scale:.1f}; provided {stud_gpa:.2f}/{student_scale:.1f}",
+                success_explanation=f"Satisfies GPA requirement ({stud_gpa:.2f} >= {req_gpa:.2f})"
+            )
+            item["status"] = status_val
+            item["explanation"] = expl
+            return item
+        except ValueError:
+            item["status"] = "Needs Verification"
+            item["explanation"] = f"Invalid numeric GPA format '{c_val}' in criterion"
+            return item
+
+    # 4. COUNTY RESTRICTION
+    elif c_type == "COUNTY_RESTRICTION":
+        raw_county = getattr(student, "county_of_origin", None)
+        item["provided"] = raw_county or "Missing from profile"
+        if not raw_county or not str(raw_county).strip():
+            item["status"] = "Needs Verification"
+            item["explanation"] = "County of origin not specified in student profile"
+            return item
+
+        c_norm = normalize_county(raw_county)
+        if c_norm.status != NormalizationStatus.NORMALIZED or not c_norm.canonical_name:
+            item["status"] = "Needs Verification"
+            item["explanation"] = f"County '{raw_county}' could not be normalized to official 47 Kenya counties"
+            return item
+
+        allowed_counties = [c.strip().lower() for c in c_val.split(",") if c.strip()]
+        preliminary = c_norm.canonical_name.lower() in allowed_counties
+        status_val, expl = resolve_status(
+            preliminary,
+            failure_explanation=f"Restricted to {c_val}; student from {c_norm.canonical_name}",
+            success_explanation=f"Origin county {c_norm.canonical_name} satisfies geographic restriction"
+        )
+        item["status"] = status_val
+        item["explanation"] = expl
+        return item
+
+    # 5. GEOGRAPHIC ALLOCATION / QUOTA
+    elif c_type == "GEOGRAPHIC_ALLOCATION":
+        raw_county = getattr(student, "county_of_origin", None)
+        item["provided"] = raw_county or "Missing from profile"
+        if raw_county:
+            c_norm = normalize_county(raw_county)
+            allowed_counties = [c.strip().lower() for c in c_val.split(",") if c.strip()]
+            if c_norm.canonical_name and c_norm.canonical_name.lower() in allowed_counties:
+                item["status"] = "Meets"
+                item["explanation"] = f"Qualifies for {c_norm.canonical_name} affirmative action / allocation quota"
+                return item
+        item["status"] = "Meets"
+        item["explanation"] = "Opportunity specifies regional quotas; candidates from all counties remain eligible"
+        return item
+
+    # 6. GRADUATION YEAR RANGE
+    elif c_type == "GRADUATION_YEAR_RANGE":
+        grad_yr = getattr(student, "graduation_year", None)
+        item["provided"] = f"Class of {grad_yr}" if grad_yr else "Missing from profile"
+        if not grad_yr:
+            item["status"] = "Needs Verification"
+            item["explanation"] = "Graduation year not recorded in student profile"
+            return item
+
+        try:
+            if "-" in c_val:
+                p_start, p_end = c_val.split("-")
+                y_min, y_max = int(p_start.strip()), int(p_end.strip())
+                preliminary = (y_min <= int(grad_yr) <= y_max)
+            else:
+                y_req = int(c_val.strip())
+                preliminary = (int(grad_yr) >= y_req) if c_op == "GTE" else (int(grad_yr) == y_req)
+
+            status_val, expl = resolve_status(
+                preliminary,
+                failure_explanation=f"Requires graduation between {c_val}; provided {grad_yr}",
+                success_explanation=f"Graduation year {grad_yr} falls within required window {c_val}"
+            )
+            item["status"] = status_val
+            item["explanation"] = expl
+            return item
+        except ValueError:
+            item["status"] = "Needs Verification"
+            item["explanation"] = f"Invalid graduation year format '{c_val}'"
+            return item
+
+    # 7. MONTHS SINCE GRADUATION
+    elif c_type == "MONTHS_SINCE_GRADUATION":
+        grad_yr = getattr(student, "graduation_year", None)
+        item["provided"] = f"Graduated {grad_yr}" if grad_yr else "Missing from profile"
+        if not grad_yr:
+            item["status"] = "Needs Verification"
+            item["explanation"] = "Graduation year required to compute months since graduation"
+            return item
+
+        try:
+            max_months = int(c_val.strip())
+            current_year = datetime.utcnow().year
+            approx_months = max(0, (current_year - int(grad_yr)) * 12)
+            preliminary = (approx_months <= max_months) if c_op == "LTE" else (approx_months >= max_months)
+            status_val, expl = resolve_status(
+                preliminary,
+                failure_explanation=f"Requires graduation within {max_months} months; approximately {approx_months} months elapsed",
+                success_explanation=f"Recent graduation ({approx_months} months elapsed <= {max_months} months allowed)"
+            )
+            item["status"] = status_val
+            item["explanation"] = expl
+            return item
+        except ValueError:
+            item["status"] = "Needs Verification"
+            item["explanation"] = f"Invalid month format '{c_val}'"
+            return item
+
+    # 8. EXPECTED GRADUATION WINDOW
+    elif c_type == "EXPECTED_GRADUATION_WINDOW":
+        exp_grad = getattr(student, "expected_graduation", None)
+        item["provided"] = str(exp_grad) if exp_grad else "Missing from profile"
+        if not exp_grad:
+            item["status"] = "Needs Verification"
+            item["explanation"] = "Expected graduation date not specified in student profile"
+            return item
+
+        # Temporal comparison
+        exp_norm = normalize_expected_graduation(exp_grad)
+        if exp_norm.status != NormalizationStatus.NORMALIZED:
+            item["status"] = "Needs Verification"
+            item["explanation"] = f"Expected graduation '{exp_grad}' requires administrative verification"
+            return item
+
+        item["status"] = "Meets" if is_verified else "Needs Verification"
+        item["explanation"] = f"Expected graduation {exp_norm.canonical_string} meets forward-looking window"
+        return item
+
+    # 9. ACADEMIC STANDING
+    elif c_type == "ACADEMIC_STANDING":
+        deg_lvl = (getattr(student, "degree_level", "") or "").lower()
+        yr_study = getattr(student, "year_of_study", 1)
+        grad_yr = getattr(student, "graduation_year", None)
+        item["provided"] = f"{deg_lvl.title()} (Year {yr_study})"
+
+        if c_val == "UNDERGRADUATE":
+            preliminary = ("undergraduate" in deg_lvl or "bachelor" in deg_lvl)
+        elif c_val == "GRADUATING_SENIOR":
+            preliminary = yr_study in [4, 5]
+        elif c_val == "POSTGRADUATE":
+            preliminary = ("master" in deg_lvl or "postgraduate" in deg_lvl or "phd" in deg_lvl)
+        elif c_val == "ALUMNI":
+            preliminary = bool(grad_yr and grad_yr <= datetime.utcnow().year)
+        else:
+            preliminary = True
+
+        status_val, expl = resolve_status(
+            preliminary,
+            failure_explanation=f"Requires {c_val} standing; student is {deg_lvl.title()} Year {yr_study}",
+            success_explanation=f"Academic standing qualifies ({c_val})"
+        )
+        item["status"] = status_val
+        item["explanation"] = expl
+        return item
+
+    # 10. OTHER (Citizenship, Age, Bespoke)
+    elif c_type == "OTHER":
+        if "KENYAN_CITIZEN" in c_val:
+            country = getattr(student, "country", "Kenya") or "Kenya"
+            item["provided"] = f"Citizen of {country}"
+            preliminary = (country.lower() == "kenya")
+            status_val, expl = resolve_status(
+                preliminary,
+                failure_explanation="Requires Kenyan citizenship",
+                success_explanation="Kenyan citizen status confirmed"
+            )
+            item["status"] = status_val
+            item["explanation"] = expl
+            return item
+
+        # Default fallback for unmodeled bespoke criteria
+        item["status"] = "Needs Verification"
+        item["explanation"] = f"Requires verification of criterion '{c_val}' against student documentation"
+        return item
+
+    return item
+
+
+def evaluate_opportunity_eligibility(
+    student: Any,
+    opportunity: Any,
+    criteria: Optional[List[Any]] = None
+) -> Tuple[str, List[Dict[str, Any]], Dict[str, Any]]:
+    """
+    Evaluates complete opportunity eligibility synthesizing structured criteria and legacy rules.
+    
+    Returns:
+    (overall_status, criteria_breakdown_list, evaluation_meta)
+    where overall_status is one of:
+    - 'Meets requirements'
+    - 'Needs verification'
+    - 'Does not meet requirements'
+    """
+    breakdown: List[Dict[str, Any]] = []
+
+    # 1. Degree Level
+    deg_meets, deg_status, deg_reason = evaluate_degree_level(
+        getattr(student, "degree_level", "Undergraduate"),
+        getattr(opportunity, "degree_levels", None)
+    )
+    breakdown.append({
+        "criterion": "Degree Level",
+        "criterion_type": "DEGREE_LEVEL",
+        "required": getattr(opportunity, "degree_levels", None) or "All Degree Levels",
+        "provided": getattr(student, "degree_level", "Undergraduate"),
+        "status": deg_status,
+        "is_mandatory": True,
+        "verification_status": "VERIFIED" if getattr(opportunity, "is_verified", False) else "UNVERIFIED"
+    })
+
+    # 2. Field of Study
+    field_meets, field_status, field_reason = evaluate_field_of_study(
+        getattr(student, "field_of_study", ""),
+        getattr(student, "specialisations", None),
+        getattr(opportunity, "fields_of_study", None)
+    )
+    breakdown.append({
+        "criterion": "Field of Study",
+        "criterion_type": "FIELD_OF_STUDY",
+        "required": getattr(opportunity, "fields_of_study", None) or "All Fields",
+        "provided": getattr(student, "field_of_study", ""),
+        "status": field_status,
+        "is_mandatory": True,
+        "verification_status": "VERIFIED" if getattr(opportunity, "is_verified", False) else "UNVERIFIED"
+    })
+
+    # 3. Academic Year & Standing
+    yr_meets, yr_status, yr_reason, yr_crit = evaluate_academic_year_and_standing(
+        getattr(student, "year_of_study", 1),
+        getattr(opportunity, "title", ""),
+        getattr(opportunity, "id", ""),
+        target_audience=getattr(opportunity, "target_audience", None),
+        category=getattr(opportunity, "category", None),
+        degree_levels=getattr(opportunity, "degree_levels", None),
+        source_notes=getattr(opportunity, "source_notes", None)
+    )
+    if yr_crit is not None:
+        breakdown.append({
+            "criterion": yr_crit["criterion"],
+            "criterion_type": "ACADEMIC_STANDING",
+            "required": yr_crit["required"],
+            "provided": yr_crit["provided"],
+            "status": yr_crit["status"],
+            "is_mandatory": True,
+            "verification_status": "VERIFIED" if getattr(opportunity, "is_verified", False) else "UNVERIFIED"
+        })
+
+    # 4. Structured Criteria Evaluation (if criteria exist)
+    crit_list = criteria if criteria is not None else getattr(opportunity, "eligibility_criteria", [])
+    for crit in crit_list:
+        eval_item = evaluate_structured_criterion(student, crit)
+        breakdown.append(eval_item)
+
+    # 5. Synthesize Overall Eligibility
+    # Strict rule: Only VERIFIED mandatory criteria can trigger 'Does not meet requirements'
+    has_does_not_meet = any(
+        b["status"] == "Does Not Meet" and b.get("is_mandatory", True)
+        for b in breakdown
+    )
+    has_needs_verification = any(
+        b["status"] == "Needs Verification" and b.get("is_mandatory", True)
+        for b in breakdown
+    )
+
+    if has_does_not_meet:
+        overall_status = "Does not meet requirements"
+    elif has_needs_verification:
+        overall_status = "Needs verification"
+    else:
+        overall_status = "Meets requirements"
+
+    eval_meta = {
+        "deg_meets": deg_meets,
+        "field_status": field_status,
+        "deg_reason": deg_reason,
+        "field_reason": field_reason,
+        "yr_reason": yr_reason,
+    }
+
+    return (overall_status, breakdown, eval_meta)
+
